@@ -3,6 +3,10 @@ package subsystem
 import (
 	"errors"
 
+	helminput "ocm.software/open-component-model/bindings/go/helm/input"
+	"ocm.software/open-component-model/bindings/go/input/dir"
+	"ocm.software/open-component-model/bindings/go/input/file"
+	"ocm.software/open-component-model/bindings/go/input/utf8"
 	"ocm.software/open-component-model/bindings/go/plugin/manager"
 )
 
@@ -42,9 +46,20 @@ func NewRegistryFromPluginManager(pm *manager.PluginManager) (*Registry, error) 
 		ocmRepository.Scheme.RegisterScheme(pm.ComponentVersionRepositoryRegistry.GetComponentVersionRepositoryScheme()),
 		ocmRepositoryLister.Scheme.RegisterScheme(pm.ComponentListerRegistry.GetComponentVersionRepositoryScheme()),
 		ocmResourceRepository.Scheme.RegisterScheme(pm.ResourcePluginRegistry.ResourceScheme()),
-		input.Scheme.RegisterScheme(pm.InputRegistry.InputRepositoryScheme()),
 		credentialRepository.Scheme.RegisterScheme(pm.CredentialRepositoryRegistry.RepositoryScheme()),
 		signingHandler.Scheme.RegisterScheme(pm.SigningRegistry.ResourceScheme()),
+	); err != nil {
+		return nil, err
+	}
+
+	// Register input type schemes directly for documentation/discovery.
+	// The actual input processing is done by transformers in the graph builder,
+	// but we still want `describe types input` to list available input types.
+	if err := errors.Join(
+		input.Scheme.RegisterScheme(file.Scheme),
+		input.Scheme.RegisterScheme(utf8.Scheme),
+		input.Scheme.RegisterScheme(dir.Scheme),
+		input.Scheme.RegisterScheme(helminput.Scheme),
 	); err != nil {
 		return nil, err
 	}

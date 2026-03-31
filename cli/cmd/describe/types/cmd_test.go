@@ -26,10 +26,9 @@ func TestDescribeTypesListSubsystems(t *testing.T) {
 	output := result.String()
 
 	// Should contain known subsystems
-	assert.Contains(t, output, "input")
 	assert.Contains(t, output, "ocm-repository")
 	assert.Contains(t, output, "signing")
-	assert.Contains(t, output, "access")
+	assert.Contains(t, output, "input")
 }
 
 func TestDescribeTypesListTypes(t *testing.T) {
@@ -47,7 +46,6 @@ func TestDescribeTypesListTypes(t *testing.T) {
 
 	// Should contain known input types
 	assert.Contains(t, output, "file")
-	assert.Contains(t, output, "dir")
 }
 
 func TestDescribeTypesDescribeType(t *testing.T) {

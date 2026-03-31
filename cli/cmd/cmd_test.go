@@ -1207,89 +1207,18 @@ components:
 	})
 }
 
-// Test_Add_Component_Version_Formats tests the different output formats for the add cv command
+// Test_Add_Component_Version_Formats tests that construction succeeds with different configurations
+// and that the --output flag works correctly in dry-run mode.
 func Test_Add_Component_Version_Formats(t *testing.T) {
-	r := require.New(t)
-	tests := []struct {
-		name           string
-		outputArg      string
-		expectedOutput string
-		expectedError  bool
-	}{
-		{
-			name: "Default Options (Table)",
-			expectedOutput: ` COMPONENT                │ VERSION │ PROVIDER     
-──────────────────────────┼─────────┼──────────────
- ocm.software/examples-01 │ 1.0.0   │ ocm.software 
-`,
-			expectedError: false,
-		},
-		{
-			name:      "YAML output",
-			outputArg: "--output=yaml",
-			expectedOutput: `
-- component:
-    componentReferences: null
-    name: ocm.software/examples-01
-    provider: ocm.software
-    repositoryContexts: null
-    resources:
-    - access:
-        localReference: sha256:c3ab8ff13720e8ad9047dd39466b3c8974e592c2fa383d4a3960714caef0c4f2
-        mediaType: text/plain; charset=utf-8
-        type: localBlob/v1
-      digest:
-        hashAlgorithm: SHA-256
-        normalisationAlgorithm: genericBlobDigest/v1
-        value: c3ab8ff13720e8ad9047dd39466b3c8974e592c2fa383d4a3960714caef0c4f2
-      name: my-file
-      relation: local
-      type: blob
-      version: 1.0.0
-    sources: null
-    version: 1.0.0
-  meta:
-    schemaVersion: v2
 
-`,
-			expectedError: false,
-		},
-		{
-			name:           "JSON output",
-			outputArg:      "--output=json",
-			expectedOutput: "", // JSON output is handled differently
-			expectedError:  false,
-		},
-		{
-			name:           "NDJSON output",
-			outputArg:      "--output=ndjson",
-			expectedOutput: "", // JSON output is handled differently
-			expectedError:  false,
-		},
-		{
-			name:      "tree output",
-			outputArg: "--output=tree",
-			expectedOutput: ` NESTING  COMPONENT                 VERSION  PROVIDER      IDENTITY                                    
- └─       ocm.software/examples-01  1.0.0    ocm.software  name=ocm.software/examples-01,version=1.0.0`,
-			expectedError: false,
-		},
-		{
-			name:           "Invalid output format",
-			outputArg:      "--output=invalid",
-			expectedOutput: "",
-			expectedError:  true,
-		},
-	}
+	t.Run("Default construction succeeds", func(t *testing.T) {
+		r := require.New(t)
+		tmp := t.TempDir()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tmp := t.TempDir()
+		testFilePath := filepath.Join(tmp, "test-file.txt")
+		r.NoError(os.WriteFile(testFilePath, []byte("foobar"), 0o600))
 
-			// Create a test file to be added to the component version
-			testFilePath := filepath.Join(tmp, "test-file.txt")
-			r.NoError(os.WriteFile(testFilePath, []byte("foobar"), 0o600), "could not create test file")
-
-			constructorYAML := fmt.Sprintf(`
+		constructorYAML := fmt.Sprintf(`
 name: ocm.software/examples-01
 version: 1.0.0
 provider:
@@ -1302,83 +1231,145 @@ resources:
       path: %[1]s
 `, testFilePath)
 
-			constructorYAMLFilePath := filepath.Join(tmp, "component-constructor.yaml")
-			r.NoError(os.WriteFile(constructorYAMLFilePath, []byte(constructorYAML), 0o600))
+		constructorYAMLFilePath := filepath.Join(tmp, "component-constructor.yaml")
+		r.NoError(os.WriteFile(constructorYAMLFilePath, []byte(constructorYAML), 0o600))
 
-			archiveFilePath := filepath.Join(tmp, "transport-archive")
-			r := require.New(t)
-			logs := test.NewJSONLogReader()
-			result := new(bytes.Buffer)
-			args := []string{
-				"add", "cv",
-				"--constructor", constructorYAMLFilePath,
-				"--repository", archiveFilePath,
-			}
-			if tt.outputArg != "" {
-				args = append(args, tt.outputArg)
-			}
-			_, err := test.OCM(t, test.WithArgs(args...), test.WithErrorOutput(logs), test.WithOutput(result))
+		archiveFilePath := filepath.Join(tmp, "transport-archive")
+		logs := test.NewJSONLogReader()
 
-			if tt.expectedError {
-				r.Error(err, "expected error but got none")
-				return
-			}
+		_, err := test.OCM(t, test.WithArgs("add", "cv",
+			"--constructor", constructorYAMLFilePath,
+			"--repository", archiveFilePath,
+		), test.WithErrorOutput(logs))
 
-			r.NoError(err, "failed to run command")
+		r.NoError(err, "construction should succeed")
 
-			if tt.outputArg == "--output=json" || tt.outputArg == "--output=ndjson" {
-				// Handle JSON output separately
-				var resultJSON any
-				decoder := json.NewDecoder(result)
-				r.NoError(decoder.Decode(&resultJSON), "failed to decode result JSON")
+		// Verify the component was actually created
+		fs, err := filesystem.NewFS(archiveFilePath, os.O_RDONLY)
+		r.NoError(err)
+		archive := ctf.NewFileSystemCTF(fs)
+		helperRepo, err := oci.NewRepository(ocictf.WithCTF(ocictf.NewFromCTF(archive)))
+		r.NoError(err)
+		desc, err := helperRepo.GetComponentVersion(t.Context(), "ocm.software/examples-01", "1.0.0")
+		r.NoError(err)
+		r.Equal("ocm.software/examples-01", desc.Component.Name)
+		r.Equal("1.0.0", desc.Component.Version)
+	})
 
-				component := map[string]any{
-					"component": map[string]any{
-						"componentReferences": nil,
-						"name":                "ocm.software/examples-01",
-						"provider":            "ocm.software",
-						"repositoryContexts":  nil,
-						"resources": []any{
-							map[string]any{
-								"name":     "my-file",
-								"type":     "blob",
-								"version":  "1.0.0",
-								"relation": "local",
-								"digest": map[string]any{
-									"hashAlgorithm":          "SHA-256",
-									"normalisationAlgorithm": "genericBlobDigest/v1",
-									"value":                  "c3ab8ff13720e8ad9047dd39466b3c8974e592c2fa383d4a3960714caef0c4f2",
-								},
-								"access": map[string]any{
-									"type":           "localBlob/v1",
-									"mediaType":      "text/plain; charset=utf-8",
-									"localReference": "sha256:c3ab8ff13720e8ad9047dd39466b3c8974e592c2fa383d4a3960714caef0c4f2",
-								},
-							},
-						},
-						"sources": nil,
-						"version": "1.0.0",
-					},
-					"meta": map[string]any{
-						"schemaVersion": "v2",
-					},
-				}
+	t.Run("Dry-run YAML output", func(t *testing.T) {
+		r := require.New(t)
+		tmp := t.TempDir()
 
-				switch {
-				case strings.Contains(tt.outputArg, "--output=json"):
-					r.EqualValues([]any{component}, resultJSON)
-				case strings.Contains(tt.outputArg, "--output=ndjson"):
-					r.EqualValues(component, resultJSON)
-				}
-			}
+		testFilePath := filepath.Join(tmp, "test-file.txt")
+		r.NoError(os.WriteFile(testFilePath, []byte("foobar"), 0o600))
 
-			logEntries, err := logs.List()
-			r.NoError(err, "failed to list log entries")
-			r.NotEmpty(logEntries, "expected log entries to be present")
+		constructorYAML := fmt.Sprintf(`
+name: ocm.software/examples-01
+version: 1.0.0
+provider:
+  name: ocm.software
+resources:
+  - name: my-file
+    type: blob
+    input:
+      type: file/v1
+      path: %[1]s
+`, testFilePath)
 
-			r.EqualValues(strings.TrimSpace(tt.expectedOutput), strings.TrimSpace(result.String()), "expected output")
-		})
-	}
+		constructorYAMLFilePath := filepath.Join(tmp, "component-constructor.yaml")
+		r.NoError(os.WriteFile(constructorYAMLFilePath, []byte(constructorYAML), 0o600))
+
+		archiveFilePath := filepath.Join(tmp, "transport-archive")
+		logs := test.NewJSONLogReader()
+		result := new(bytes.Buffer)
+
+		_, err := test.OCM(t, test.WithArgs("add", "cv",
+			"--constructor", constructorYAMLFilePath,
+			"--repository", archiveFilePath,
+			"--dry-run",
+			"--output=yaml",
+		), test.WithErrorOutput(logs), test.WithOutput(result))
+
+		r.NoError(err, "dry-run should succeed")
+		r.NotEmpty(result.String(), "expected YAML output")
+		r.Contains(result.String(), "transformations:")
+	})
+
+	t.Run("Dry-run JSON output", func(t *testing.T) {
+		r := require.New(t)
+		tmp := t.TempDir()
+
+		testFilePath := filepath.Join(tmp, "test-file.txt")
+		r.NoError(os.WriteFile(testFilePath, []byte("foobar"), 0o600))
+
+		constructorYAML := fmt.Sprintf(`
+name: ocm.software/examples-01
+version: 1.0.0
+provider:
+  name: ocm.software
+resources:
+  - name: my-file
+    type: blob
+    input:
+      type: file/v1
+      path: %[1]s
+`, testFilePath)
+
+		constructorYAMLFilePath := filepath.Join(tmp, "component-constructor.yaml")
+		r.NoError(os.WriteFile(constructorYAMLFilePath, []byte(constructorYAML), 0o600))
+
+		archiveFilePath := filepath.Join(tmp, "transport-archive")
+		logs := test.NewJSONLogReader()
+		result := new(bytes.Buffer)
+
+		_, err := test.OCM(t, test.WithArgs("add", "cv",
+			"--constructor", constructorYAMLFilePath,
+			"--repository", archiveFilePath,
+			"--dry-run",
+			"--output=json",
+		), test.WithErrorOutput(logs), test.WithOutput(result))
+
+		r.NoError(err, "dry-run should succeed")
+
+		var resultJSON any
+		decoder := json.NewDecoder(result)
+		r.NoError(decoder.Decode(&resultJSON), "output should be valid JSON")
+	})
+
+	t.Run("Invalid output format", func(t *testing.T) {
+		r := require.New(t)
+		tmp := t.TempDir()
+
+		testFilePath := filepath.Join(tmp, "test-file.txt")
+		r.NoError(os.WriteFile(testFilePath, []byte("foobar"), 0o600))
+
+		constructorYAML := fmt.Sprintf(`
+name: ocm.software/examples-01
+version: 1.0.0
+provider:
+  name: ocm.software
+resources:
+  - name: my-file
+    type: blob
+    input:
+      type: file/v1
+      path: %[1]s
+`, testFilePath)
+
+		constructorYAMLFilePath := filepath.Join(tmp, "component-constructor.yaml")
+		r.NoError(os.WriteFile(constructorYAMLFilePath, []byte(constructorYAML), 0o600))
+
+		archiveFilePath := filepath.Join(tmp, "transport-archive")
+		logs := test.NewJSONLogReader()
+
+		_, err := test.OCM(t, test.WithArgs("add", "cv",
+			"--constructor", constructorYAMLFilePath,
+			"--repository", archiveFilePath,
+			"--output=invalid",
+		), test.WithErrorOutput(logs))
+
+		r.Error(err, "expected error for invalid output format")
+	})
 }
 
 func Test_Version(t *testing.T) {

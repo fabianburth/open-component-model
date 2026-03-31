@@ -36,6 +36,15 @@ var schemaCTFAddLocalResourceOutput []byte
 //go:embed schemas/CTFAddLocalResourceSpec.schema.json
 var schemaCTFAddLocalResourceSpec []byte
 
+//go:embed schemas/CTFAddLocalSource.schema.json
+var schemaCTFAddLocalSource []byte
+
+//go:embed schemas/CTFAddLocalSourceOutput.schema.json
+var schemaCTFAddLocalSourceOutput []byte
+
+//go:embed schemas/CTFAddLocalSourceSpec.schema.json
+var schemaCTFAddLocalSourceSpec []byte
+
 //go:embed schemas/CTFGetComponentVersion.schema.json
 var schemaCTFGetComponentVersion []byte
 
@@ -80,6 +89,15 @@ var schemaOCIAddLocalResourceOutput []byte
 
 //go:embed schemas/OCIAddLocalResourceSpec.schema.json
 var schemaOCIAddLocalResourceSpec []byte
+
+//go:embed schemas/OCIAddLocalSource.schema.json
+var schemaOCIAddLocalSource []byte
+
+//go:embed schemas/OCIAddLocalSourceOutput.schema.json
+var schemaOCIAddLocalSourceOutput []byte
+
+//go:embed schemas/OCIAddLocalSourceSpec.schema.json
+var schemaOCIAddLocalSourceSpec []byte
 
 //go:embed schemas/OCIGetComponentVersion.schema.json
 var schemaOCIGetComponentVersion []byte
@@ -142,6 +160,21 @@ func (CTFAddLocalResourceOutput) JSONSchema() []byte {
 // JSONSchema returns the JSON Schema for CTFAddLocalResourceSpec.
 func (CTFAddLocalResourceSpec) JSONSchema() []byte {
 	return schemaCTFAddLocalResourceSpec
+}
+
+// JSONSchema returns the JSON Schema for CTFAddLocalSource.
+func (CTFAddLocalSource) JSONSchema() []byte {
+	return schemaCTFAddLocalSource
+}
+
+// JSONSchema returns the JSON Schema for CTFAddLocalSourceOutput.
+func (CTFAddLocalSourceOutput) JSONSchema() []byte {
+	return schemaCTFAddLocalSourceOutput
+}
+
+// JSONSchema returns the JSON Schema for CTFAddLocalSourceSpec.
+func (CTFAddLocalSourceSpec) JSONSchema() []byte {
+	return schemaCTFAddLocalSourceSpec
 }
 
 // JSONSchema returns the JSON Schema for CTFGetComponentVersion.
@@ -217,6 +250,21 @@ func (OCIAddLocalResourceOutput) JSONSchema() []byte {
 // JSONSchema returns the JSON Schema for OCIAddLocalResourceSpec.
 func (OCIAddLocalResourceSpec) JSONSchema() []byte {
 	return schemaOCIAddLocalResourceSpec
+}
+
+// JSONSchema returns the JSON Schema for OCIAddLocalSource.
+func (OCIAddLocalSource) JSONSchema() []byte {
+	return schemaOCIAddLocalSource
+}
+
+// JSONSchema returns the JSON Schema for OCIAddLocalSourceOutput.
+func (OCIAddLocalSourceOutput) JSONSchema() []byte {
+	return schemaOCIAddLocalSourceOutput
+}
+
+// JSONSchema returns the JSON Schema for OCIAddLocalSourceSpec.
+func (OCIAddLocalSourceSpec) JSONSchema() []byte {
+	return schemaOCIAddLocalSourceSpec
 }
 
 // JSONSchema returns the JSON Schema for OCIGetComponentVersion.

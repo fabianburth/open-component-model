@@ -90,16 +90,6 @@ type SourceInputMethod interface {
 	ProcessSource(ctx context.Context, source *constructor.Source, credentials map[string]string) (result *SourceInputMethodResult, err error)
 }
 
-type ResourceInputMethodProvider interface {
-	// GetResourceInputMethod returns the input method for the given resource constructor specification.
-	GetResourceInputMethod(ctx context.Context, resource *constructor.Resource) (ResourceInputMethod, error)
-}
-
-type SourceInputMethodProvider interface {
-	// GetSourceInputMethod returns the input method for the given source constructor specification.
-	GetSourceInputMethod(ctx context.Context, src *constructor.Source) (SourceInputMethod, error)
-}
-
 type ResourceDigestProcessor interface {
 	// GetResourceDigestProcessorCredentialConsumerIdentity resolves the identity of the given resource to use for credential resolution
 	// for the digest processor. The identity returned MAY be used to resolve credentials for the digest processor.
@@ -112,66 +102,9 @@ type ResourceDigestProcessor interface {
 	ProcessResourceDigest(ctx context.Context, resource *descriptor.Resource, credentials map[string]string) (*descriptor.Resource, error)
 }
 
-type ResourceDigestProcessorProvider interface {
-	// GetDigestProcessor returns the digest processor for the given resource constructor specification.
-	GetDigestProcessor(ctx context.Context, resource *descriptor.Resource) (ResourceDigestProcessor, error)
-}
-
-// TargetRepository defines the interface for a target repository that can store component versions and associated local resources
-type TargetRepository interface {
-	// AddLocalResource adds a local resource to the repository.
-	// The resource must be referenced in the component descriptor.
-	// Resources for non-existent component versions may be stored but may be removed during garbage collection cycles
-	// after a time set by the underlying repository implementation.
-	// Thus it is mandatory to add a component version to permanently persist a resource added with AddLocalResource.
-	// The Resource given is identified later on by its own Identity and a collection of a set of reserved identity values
-	// that can have a special meaning.
-	AddLocalResource(ctx context.Context, component, version string, res *descriptor.Resource, content blob.ReadOnlyBlob) (newRes *descriptor.Resource, err error)
-
-	// AddLocalSource adds a local source to the repository.
-	// The source must be referenced in the component descriptor.
-	// Sources for non-existent component versions may be stored but may be removed during garbage collection cycles
-	// after a time set by the underlying repository implementation.
-	// Thus it is mandatory to add a component version to permanently persist a source added with AddLocalSource.
-	// The Source given is identified later on by its own Identity and a collection of a set of reserved identity values
-	// that can have a special meaning.
-	AddLocalSource(ctx context.Context, component, version string, res *descriptor.Source, content blob.ReadOnlyBlob) (newRes *descriptor.Source, err error)
-
-	// AddComponentVersion adds a new component version to the repository.
-	// If a component version already exists, it will be updated with the new descriptor.
-	// The descriptor internally will be serialized via the runtime package.
-	// The descriptor MUST have its target Name and Version already set as they are used to identify the target
-	// Location in the Store.
-	AddComponentVersion(ctx context.Context, descriptor *descriptor.Descriptor) error
-
-	// GetComponentVersion retrieves a component version from the repository.
-	// Returns the descriptor from the most recent AddComponentVersion call for that component and version.
-	// Will be used to ensure component version existence
-	GetComponentVersion(ctx context.Context, component, version string) (desc *descriptor.Descriptor, err error)
-}
-
-type TargetRepositoryProvider interface {
-	// GetTargetRepository returns the target ocm component version repository
-	// for the given component specification in the constructor.
-	GetTargetRepository(ctx context.Context, comp *constructor.Component) (TargetRepository, error)
-}
-
 type ExternalComponentRepositoryProvider interface {
 	// GetExternalRepository returns the target ocm repository for the given component specification in the constructor.
 	GetExternalRepository(ctx context.Context, name, version string) (repository.ComponentVersionRepository, error)
-}
-
-type ResourceRepository interface {
-	// ResourceConsumerIdentityProvider that resolves the identity of the given resource to use for credential resolution.
-	// These can then be passed to DownloadResource.
-	ResourceConsumerIdentityProvider
-	// DownloadResource downloads a resource from the repository.
-	DownloadResource(ctx context.Context, res *descriptor.Resource, credentials map[string]string) (content blob.ReadOnlyBlob, err error)
-}
-
-type ResourceRepositoryProvider interface {
-	// GetResourceRepository returns the target ocm resource repository for the given resource specification in the constructor.
-	GetResourceRepository(ctx context.Context, comp *constructor.Resource) (ResourceRepository, error)
 }
 
 type ResourceConsumerIdentityProvider interface {

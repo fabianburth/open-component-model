@@ -1,8 +1,9 @@
 package componentversion
 
 import (
+	"bytes"
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,52 +11,44 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
 
-	"ocm.software/open-component-model/bindings/go/blob"
 	"ocm.software/open-component-model/bindings/go/constructor"
 	constructorruntime "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/spec/v1"
-	"ocm.software/open-component-model/bindings/go/credentials"
-	"ocm.software/open-component-model/bindings/go/dag"
-	syncdag "ocm.software/open-component-model/bindings/go/dag/sync"
-	descriptor "ocm.software/open-component-model/bindings/go/descriptor/runtime"
-	descriptorv2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	"ocm.software/open-component-model/bindings/go/oci/compref"
 	ctfv1 "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/ctf"
 	ociv1 "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/oci"
-	"ocm.software/open-component-model/bindings/go/plugin/manager"
-	"ocm.software/open-component-model/bindings/go/plugin/manager/registries/resource"
 	"ocm.software/open-component-model/bindings/go/repository"
 	"ocm.software/open-component-model/bindings/go/repository/component/resolvers"
 	"ocm.software/open-component-model/bindings/go/runtime"
+	graphRuntime "ocm.software/open-component-model/bindings/go/transform/graph/runtime"
+	transformv1alpha1 "ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1"
 	"ocm.software/open-component-model/cli/cmd/setup/hooks"
 	ocmctx "ocm.software/open-component-model/cli/internal/context"
 	"ocm.software/open-component-model/cli/internal/flags/enum"
 	"ocm.software/open-component-model/cli/internal/flags/file"
 	"ocm.software/open-component-model/cli/internal/flags/log"
 	"ocm.software/open-component-model/cli/internal/render"
-	"ocm.software/open-component-model/cli/internal/render/graph/list"
-	"ocm.software/open-component-model/cli/internal/render/graph/tree"
 	"ocm.software/open-component-model/cli/internal/repository/ocm"
-	"ocm.software/open-component-model/cli/internal/subsystem"
 )
 
 const (
-	FlagConcurrencyLimit                   = "concurrency-limit"
 	FlagRepositoryRef                      = "repository"
 	FlagComponentConstructorPath           = "constructor"
-	FlagBlobCacheDirectory                 = "blob-cache-directory"
 	FlagComponentVersionConflictPolicy     = "component-version-conflict-policy"
 	FlagExternalComponentVersionCopyPolicy = "external-component-version-copy-policy"
 	FlagSkipReferenceDigestProcessing      = "skip-reference-digest-processing"
+	FlagDryRun                             = "dry-run"
 	FlagOutput                             = "output"
-	FlagDisplayMode                        = "display-mode"
 
 	DefaultComponentConstructorBaseName = "component-constructor"
 	LegacyDefaultArchiveName            = "transport-archive"
+
+	// Each node emits 2 events (Running + Completed/Failed) and since the renderer consumes
+	// them faster than the constructor produces, 16 is enough to avoid blocking with room to grow.
+	eventBufferSize = 16
 )
 
 type ComponentVersionConflictPolicy string
@@ -194,21 +187,15 @@ add component-version --%[1]s ./archive --%[2]s %[3]s.yaml
 		RunE:              AddComponentVersion,
 		PersistentPreRunE: persistentPreRunE,
 		DisableAutoGenTag: true,
-		Annotations: map[string]string{
-			subsystem.Annotation: "input-method",
-		},
 	}
 
-	cmd.Flags().Int(FlagConcurrencyLimit, 4, "maximum number of component versions that can be constructed concurrently.")
 	cmd.Flags().StringP(FlagRepositoryRef, string(FlagRepositoryRef[0]), LegacyDefaultArchiveName, "repository ref")
 	file.VarP(cmd.Flags(), FlagComponentConstructorPath, string(FlagComponentConstructorPath[0]), DefaultComponentConstructorBaseName+".yaml", "path to the component constructor file")
-	cmd.Flags().String(FlagBlobCacheDirectory, filepath.Join(".ocm", "cache"), "path to the blob cache directory")
 	enum.Var(cmd.Flags(), FlagComponentVersionConflictPolicy, ComponentVersionConflictPolicies(), "policy to apply when a component version already exists in the repository")
 	enum.Var(cmd.Flags(), FlagExternalComponentVersionCopyPolicy, ExternalComponentVersionCopyPolicies(), "policy to apply when a component reference to a component version outside of the constructor or target repository is encountered")
 	cmd.Flags().Bool(FlagSkipReferenceDigestProcessing, false, "skip digest processing for resources and sources. Any resource referenced via access type will not have their digest updated.")
-	enum.VarP(cmd.Flags(), FlagOutput, "o", []string{render.OutputFormatTable.String(), render.OutputFormatYAML.String(), render.OutputFormatJSON.String(), render.OutputFormatNDJSON.String(), render.OutputFormatTree.String()}, "output format of the component descriptors")
-	enum.VarP(cmd.Flags(), FlagDisplayMode, "", []string{render.StaticRenderMode, render.LiveRenderMode}, `static: print the output once the complete component graph is discovered
-  live (experimental): continuously updates the output to represent the current construction state of the component graph`)
+	cmd.Flags().Bool(FlagDryRun, false, "build and validate the graph but do not execute")
+	enum.VarP(cmd.Flags(), FlagOutput, "o", []string{render.OutputFormatYAML.String(), render.OutputFormatJSON.String(), render.OutputFormatNDJSON.String()}, "output format of the transformation graph definition (dry-run only)")
 
 	return cmd
 }
@@ -242,29 +229,31 @@ func persistentPreRunE(cmd *cobra.Command, _ []string) error {
 
 func AddComponentVersion(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
-	pluginManager := ocmctx.FromContext(cmd.Context()).PluginManager()
-	if pluginManager == nil {
+	octx := ocmctx.FromContext(ctx)
+
+	pm := octx.PluginManager()
+	if pm == nil {
 		return fmt.Errorf("could not retrieve plugin manager from context")
 	}
 
-	ocmContext := ocmctx.FromContext(ctx)
-	if ocmContext == nil {
-		return fmt.Errorf("no OCM context found")
-	}
-
-	credentialGraph := ocmctx.FromContext(cmd.Context()).CredentialGraph()
-	if credentialGraph == nil {
+	credGraph := octx.CredentialGraph()
+	if credGraph == nil {
 		return fmt.Errorf("could not retrieve credential graph from context")
-	}
-
-	concurrencyLimit, err := cmd.Flags().GetInt(FlagConcurrencyLimit)
-	if err != nil {
-		return fmt.Errorf("getting concurrency-limit flag failed: %w", err)
 	}
 
 	skipReferenceDigestProcessing, err := cmd.Flags().GetBool(FlagSkipReferenceDigestProcessing)
 	if err != nil {
 		return fmt.Errorf("getting skip-reference-digest-processing flag failed: %w", err)
+	}
+
+	dryRun, err := cmd.Flags().GetBool(FlagDryRun)
+	if err != nil {
+		return fmt.Errorf("getting dry-run flag failed: %w", err)
+	}
+
+	output, err := enum.Get(cmd.Flags(), FlagOutput)
+	if err != nil {
+		return fmt.Errorf("getting output flag failed: %w", err)
 	}
 
 	cvConflictPolicy, err := enum.Get(cmd.Flags(), FlagComponentVersionConflictPolicy)
@@ -282,11 +271,6 @@ func AddComponentVersion(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("getting repository spec failed: %w", err)
 	}
 
-	cacheDir, err := cmd.Flags().GetString(FlagBlobCacheDirectory)
-	if err != nil {
-		return fmt.Errorf("getting blob cache directory flag failed: %w", err)
-	}
-
 	constructorFile, err := getComponentConstructorFile(cmd)
 	if err != nil {
 		return fmt.Errorf("getting component constructor path failed: %w", err)
@@ -297,63 +281,134 @@ func AddComponentVersion(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("getting component constructor failed: %w", err)
 	}
 
-	output, err := enum.Get(cmd.Flags(), FlagOutput)
-	if err != nil {
-		return fmt.Errorf("getting output flag failed: %w", err)
-	}
-
-	displayMode, err := enum.Get(cmd.Flags(), FlagDisplayMode)
-	if err != nil {
-		return fmt.Errorf("getting display-mode flag failed: %w", err)
-	}
-
 	repositoryRef, err := cmd.Flags().GetString(FlagRepositoryRef)
 	if err != nil {
 		return fmt.Errorf("getting repository reference flag failed: %w", err)
 	}
 
-	config := ocmctx.FromContext(cmd.Context()).Configuration()
+	config := octx.Configuration()
 	ref, err := compref.ParseRepository(repositoryRef, compref.WithCTFAccessMode(ctfv1.AccessModeCreate+"|"+ctfv1.AccessModeReadWrite))
 	if err != nil {
 		return fmt.Errorf("parsing repository reference %q failed: %w", repositoryRef, err)
 	}
 
-	repoResolver, err := ocm.NewComponentRepositoryResolver(cmd.Context(),
-		pluginManager.ComponentVersionRepositoryRegistry,
-		credentialGraph,
+	repoResolver, err := ocm.NewComponentRepositoryResolver(ctx,
+		pm.ComponentVersionRepositoryRegistry,
+		credGraph,
 		ocm.WithRepository(ref), ocm.WithConfig(config),
 	)
 	if err != nil {
 		return fmt.Errorf("could not initialize ocm repository: %w", err)
 	}
 
-	instance := &constructorProvider{
-		cache:              cacheDir,
-		targetRepoSpec:     repoSpec,
-		repositoryResolver: repoResolver,
-		pluginManager:      pluginManager,
-		graph:              credentialGraph,
+	// Determine working directory from filesystem config
+	var workingDir string
+	if fsCfg := octx.FilesystemConfig(); fsCfg != nil {
+		workingDir = fsCfg.WorkingDirectory
 	}
 
-	opts := constructor.Options{
-		TargetRepositoryProvider:            instance,
-		ResourceRepositoryProvider:          instance,
-		SourceInputMethodProvider:           instance,
-		ResourceInputMethodProvider:         instance,
-		ExternalComponentRepositoryProvider: instance,
-		Resolver:                            instance.graph,
-		ConcurrencyLimit:                    concurrencyLimit,
-		ComponentVersionConflictPolicy:      ComponentVersionConflictPolicy(cvConflictPolicy).ToConstructorConflictPolicy(),
-		ExternalComponentVersionCopyPolicy:  ExternalComponentVersionCopyPolicy(evCopyPolicy).ToConstructorPolicy(),
-	}
-	if !skipReferenceDigestProcessing {
-		opts.ResourceDigestProcessorProvider = instance
+	// Pre-flight conflict check: verify component versions don't already exist
+	// when the policy requires it. This must happen before building the graph
+	// because the graph builder doesn't have repository access.
+	conflictPolicy := ComponentVersionConflictPolicy(cvConflictPolicy).ToConstructorConflictPolicy()
+	if conflictPolicy != constructor.ComponentVersionConflictReplace {
+		var kept []constructorruntime.Component
+		for i := range constructorSpec.Components {
+			comp := &constructorSpec.Components[i]
+			repo, err := repoResolver.GetComponentVersionRepositoryForComponent(ctx, comp.Name, comp.Version)
+			if err != nil {
+				slog.DebugContext(ctx, "could not resolve repository for conflict check, skipping check",
+					"component", comp.Name, "version", comp.Version, "error", err)
+				kept = append(kept, *comp)
+				continue
+			}
+			if repo == nil {
+				kept = append(kept, *comp)
+				continue
+			}
+			_, err = repo.GetComponentVersion(ctx, comp.Name, comp.Version)
+			if err == nil {
+				// Component version exists
+				if conflictPolicy == constructor.ComponentVersionConflictAbortAndFail {
+					return fmt.Errorf("component version %q already exists in target repository",
+						comp.ToIdentity())
+				}
+				// Skip policy
+				slog.WarnContext(ctx, "component version already exists, skipping",
+					"component", comp.Name, "version", comp.Version)
+				continue
+			}
+			kept = append(kept, *comp)
+		}
+		constructorSpec.Components = kept
 	}
 
-	constr := constructor.NewDefaultConstructor(constructorSpec, opts)
-	if err := renderComponents(cmd, constr, output, displayMode); err != nil {
-		return fmt.Errorf("failed to render components recursively: %w", err)
+	// Build transformation graph definition
+	tgd, err := constructor.BuildGraphDefinition(ctx, constructorSpec,
+		constructor.WithTargetRepository(repoSpec),
+		constructor.WithWorkingDirectory(workingDir),
+		constructor.WithExternalComponentRepository(&externalRepoProvider{resolver: repoResolver}),
+		constructor.WithConflictPolicy(ComponentVersionConflictPolicy(cvConflictPolicy).ToConstructorConflictPolicy()),
+		constructor.WithExternalCopyPolicy(ExternalComponentVersionCopyPolicy(evCopyPolicy).ToConstructorPolicy()),
+		constructor.WithSkipDigestProcessing(skipReferenceDigestProcessing),
+	)
+	if err != nil {
+		return fmt.Errorf("building graph definition failed: %w", err)
 	}
+
+	// Build transformer builder
+	b := constructor.NewDefaultBuilder(pm.ComponentVersionRepositoryRegistry, credGraph)
+	graph, err := b.
+		WithEvents(make(chan graphRuntime.ProgressEvent, eventBufferSize)).
+		BuildAndCheck(tgd)
+	if err != nil {
+		reader, rerr := renderTGD(tgd, output)
+		if rerr != nil {
+			return fmt.Errorf("graph build failed: %w (rendering also failed: %w)", err, rerr)
+		}
+		defer func() {
+			if reader != nil {
+				_ = reader.Close()
+			}
+		}()
+		raw, readErr := io.ReadAll(reader)
+		if readErr != nil {
+			return fmt.Errorf("graph build failed: %w (reading render also failed: %w)", err, readErr)
+		}
+		if len(raw) == 0 {
+			return fmt.Errorf("graph build failed: %w", err)
+		}
+		return fmt.Errorf("graph build failed: %w\n%s", err, raw)
+	}
+
+	if dryRun {
+		reader, err := renderTGD(tgd, output)
+		if err != nil {
+			return fmt.Errorf("rendering transformation graph failed: %w", err)
+		}
+		defer func() {
+			if err := reader.Close(); err != nil {
+				slog.WarnContext(ctx, "closing transformation graph reader failed", "error", err)
+			}
+		}()
+		if _, err := io.Copy(cmd.OutOrStdout(), reader); err != nil {
+			return fmt.Errorf("writing transformation graph failed: %w", err)
+		}
+		return nil
+	}
+
+	// Create event channel and tracker
+	tracker := newProgressTracker(graph, cmd.OutOrStdout())
+	go tracker.Start(ctx)
+
+	// Execute graph
+	if err := graph.Process(ctx); err != nil {
+		tracker.Summary(err)
+		return fmt.Errorf("construction failed: %w", err)
+	}
+	tracker.Summary(nil)
+
+	slog.DebugContext(ctx, "construction completed successfully")
 	return nil
 }
 
@@ -398,8 +453,6 @@ func GetComponentConstructor(file *file.Flag) (*constructorruntime.ComponentCons
 		return nil, fmt.Errorf("reading component constructor %q failed: %w", path, err)
 	}
 	// Perform environment variable substitution on the constructor file content.
-	// This enables dynamic configuration using ${VAR_NAME} or $VAR_NAME syntax.
-	// Variables are expanded using os.Expand with os.Getenv as the mapping function.
 	constructorData = []byte(os.Expand(string(constructorData), os.Getenv))
 
 	data := constructorv1.ComponentConstructor{}
@@ -423,212 +476,45 @@ func getComponentConstructorFile(cmd *cobra.Command) (*file.Flag, error) {
 	return constructorFlag, nil
 }
 
-var (
-	_ constructor.TargetRepositoryProvider            = (*constructorProvider)(nil)
-	_ constructor.ExternalComponentRepositoryProvider = (*constructorProvider)(nil)
-)
-
-type constructorProvider struct {
-	cache              string
-	targetRepoSpec     runtime.Typed
-	repositoryResolver resolvers.ComponentVersionRepositoryResolver
-	pluginManager      *manager.PluginManager
-	graph              credentials.Resolver
+// externalRepoProvider wraps a ComponentVersionRepositoryResolver to implement
+// the constructor.ExternalComponentRepositoryProvider interface.
+type externalRepoProvider struct {
+	resolver resolvers.ComponentVersionRepositoryResolver
 }
 
-func (prov *constructorProvider) GetExternalRepository(ctx context.Context, name, version string) (repository.ComponentVersionRepository, error) {
-	if prov.repositoryResolver == nil {
-		return nil, fmt.Errorf("cannot fetch external component version %s:%s repository provider configured", name, version)
+func (p *externalRepoProvider) GetExternalRepository(ctx context.Context, name, version string) (repository.ComponentVersionRepository, error) {
+	if p.resolver == nil {
+		return nil, fmt.Errorf("cannot fetch external component version %s:%s: no repository provider configured", name, version)
 	}
-	return prov.repositoryResolver.GetComponentVersionRepositoryForComponent(ctx, name, version)
+	return p.resolver.GetComponentVersionRepositoryForComponent(ctx, name, version)
 }
 
-func (prov *constructorProvider) GetDigestProcessor(ctx context.Context, resource *descriptor.Resource) (constructor.ResourceDigestProcessor, error) {
-	return prov.pluginManager.DigestProcessorRegistry.GetPlugin(ctx, resource.Access)
-}
-
-func (prov *constructorProvider) GetResourceInputMethod(ctx context.Context, resource *constructorruntime.Resource) (constructor.ResourceInputMethod, error) {
-	return prov.pluginManager.InputRegistry.GetResourceInputPlugin(ctx, resource.Input)
-}
-
-func (prov *constructorProvider) GetSourceInputMethod(ctx context.Context, src *constructorruntime.Source) (constructor.SourceInputMethod, error) {
-	return prov.pluginManager.InputRegistry.GetSourceInputPlugin(ctx, src.Input)
-}
-
-func (prov *constructorProvider) GetResourceRepository(ctx context.Context, resource *constructorruntime.Resource) (constructor.ResourceRepository, error) {
-	plugin, err := prov.pluginManager.ResourcePluginRegistry.GetResourcePlugin(ctx, resource.Access)
-	if err != nil {
-		return nil, fmt.Errorf("getting plugin for resource %q failed: %w", resource.Access, err)
-	}
-	return &constructorPlugin{plugin: plugin}, nil
-}
-
-type constructorPlugin struct {
-	plugin resource.Repository
-}
-
-func (c *constructorPlugin) GetResourceCredentialConsumerIdentity(ctx context.Context, resource *constructorruntime.Resource) (identity runtime.Identity, err error) {
-	return c.plugin.GetResourceCredentialConsumerIdentity(ctx, constructorruntime.ConvertToDescriptorResource(resource))
-}
-
-func (c *constructorPlugin) DownloadResource(ctx context.Context, res *descriptor.Resource, credentials map[string]string) (content blob.ReadOnlyBlob, err error) {
-	return c.plugin.DownloadResource(ctx, res, credentials)
-}
-
-func (prov *constructorProvider) GetTargetRepository(ctx context.Context, _ *constructorruntime.Component) (constructor.TargetRepository, error) {
-	var creds map[string]string
-	identity, err := prov.pluginManager.ComponentVersionRepositoryRegistry.GetComponentVersionRepositoryCredentialConsumerIdentity(ctx, prov.targetRepoSpec)
-	if err == nil {
-		if prov.graph != nil {
-			if creds, err = prov.graph.Resolve(ctx, identity); err != nil {
-				if errors.Is(err, credentials.ErrNotFound) {
-					slog.DebugContext(ctx, fmt.Sprintf("resolving credentials for repository %q failed: %s", prov.targetRepoSpec, err.Error()))
-				} else {
-					return nil, fmt.Errorf("resolving credentials for repository %q failed: %w", prov.targetRepoSpec, err)
-				}
-			}
-		}
-	} else {
-		slog.DebugContext(ctx, "could not get credential consumer identity for component version repository", "repository", prov.targetRepoSpec, "error", err)
-	}
-
-	return prov.pluginManager.ComponentVersionRepositoryRegistry.GetComponentVersionRepository(ctx, prov.targetRepoSpec, creds)
-}
-
-func renderComponents(cmd *cobra.Command, constr constructor.Constructor, format string, mode string) error {
-	switch mode {
-	case render.StaticRenderMode:
-		graph := constr.GetGraph()
-		err := constr.Construct(cmd.Context())
-		if err != nil {
-			return fmt.Errorf("constructing component versions failed: %w", err)
-		}
-
-		var roots []string
-		if err := graph.WithReadLock(func(d *dag.DirectedAcyclicGraph[string]) error {
-			roots = d.Roots()
-			return nil
-		}); err != nil {
-			return fmt.Errorf("getting roots of component version graph failed: %w", err)
-		}
-
-		renderer, err := buildRenderer(cmd.Context(), graph, roots, format)
-		if err != nil {
-			return fmt.Errorf("building renderer failed: %w", err)
-		}
-
-		if err := render.RenderOnce(cmd.Context(), renderer, render.WithWriter(cmd.OutOrStdout())); err != nil {
-			return err
-		}
-	case render.LiveRenderMode:
-		graph := constr.GetGraph()
-		// Start the render loop.
-		renderCtx, cancel := context.WithCancel(cmd.Context())
-		defer cancel()
-
-		renderer, err := buildRenderer(cmd.Context(), graph, nil, format)
-		if err != nil {
-			return fmt.Errorf("building renderer failed: %w", err)
-		}
-
-		wait := render.RunRenderLoop(renderCtx, renderer, render.WithRenderOptions(render.WithWriter(cmd.OutOrStdout())))
-
-		err = constr.Construct(cmd.Context())
-		if err != nil {
-			return fmt.Errorf("constructing component versions failed: %w", err)
-		}
-
-		if err := wait(); !errors.Is(err, context.Canceled) {
-			return fmt.Errorf("rendering component version graph failed: %w", err)
-		}
-	}
-	return nil
-}
-
-func buildRenderer(ctx context.Context, graph *syncdag.SyncedDirectedAcyclicGraph[string], roots []string, format string) (render.Renderer, error) {
-	// Initialize renderer based on the requested output format.
+func renderTGD(tgd *transformv1alpha1.TransformationGraphDefinition, format string) (io.ReadCloser, error) {
 	switch format {
 	case render.OutputFormatJSON.String():
-		serializer := list.NewSerializer(list.WithVertexSerializer(list.VertexSerializerFunc[string](serializeVertexToDescriptor)), list.WithOutputFormat[string](render.OutputFormatJSON))
-		return list.New(ctx, graph, list.WithListSerializer(serializer), list.WithRoots(roots...)), nil
+		read, write := io.Pipe()
+		encoder := json.NewEncoder(write)
+		encoder.SetIndent("", "  ")
+		go func() {
+			err := encoder.Encode(tgd)
+			_ = write.CloseWithError(err)
+		}()
+		return read, nil
 	case render.OutputFormatNDJSON.String():
-		serializer := list.NewSerializer(list.WithVertexSerializer(list.VertexSerializerFunc[string](serializeVertexToDescriptor)), list.WithOutputFormat[string](render.OutputFormatNDJSON))
-		return list.New(ctx, graph, list.WithListSerializer(serializer), list.WithRoots(roots...)), nil
+		read, write := io.Pipe()
+		encoder := json.NewEncoder(write)
+		go func() {
+			err := encoder.Encode(tgd)
+			_ = write.CloseWithError(err)
+		}()
+		return read, nil
 	case render.OutputFormatYAML.String():
-		serializer := list.NewSerializer(list.WithVertexSerializer(list.VertexSerializerFunc[string](serializeVertexToDescriptor)), list.WithOutputFormat[string](render.OutputFormatYAML))
-		return list.New(ctx, graph, list.WithListSerializer(serializer), list.WithRoots(roots...)), nil
-	case render.OutputFormatTree.String():
-		serializer := tree.VertexSerializerFunc[string](serializeVertexToDescriptorTree)
-		return tree.New(ctx, graph, tree.WithVertexSerializerFunc(serializer), tree.WithRoots(roots...)), nil
-	case render.OutputFormatTable.String():
-		serializer := list.ListSerializerFunc[string](serializeVerticesToTable)
-		return list.New(ctx, graph, list.WithListSerializer(serializer), list.WithRoots(roots...)), nil
+		data, err := yaml.Marshal(tgd)
+		if err != nil {
+			return nil, err
+		}
+		return io.NopCloser(bytes.NewReader(data)), nil
 	default:
 		return nil, fmt.Errorf("invalid output format %q", format)
 	}
-}
-
-func serializeVertexToDescriptorTree(vertex *dag.Vertex[string]) (tree.Row, error) {
-	untypedDescriptor, ok := vertex.Attributes[constructor.AttributeDescriptor]
-	if !ok {
-		return tree.Row{}, fmt.Errorf("vertex %s has no %s attribute", vertex.ID, constructor.AttributeDescriptor)
-	}
-	desc, ok := untypedDescriptor.(*descriptor.Descriptor)
-	if !ok {
-		return tree.Row{}, fmt.Errorf("expected vertex %s attribute %s to be of type %T, got type %T", vertex.ID, constructor.AttributeDescriptor, &descriptor.Descriptor{}, untypedDescriptor)
-	}
-	descriptorV2, err := descriptor.ConvertToV2(descriptorv2.Scheme, desc)
-	if err != nil {
-		return tree.Row{}, fmt.Errorf("converting descriptor to v2 failed: %w", err)
-	}
-	identity := descriptorV2.Component.ToIdentity()
-	return tree.Row{
-		Component: descriptorV2.Component.Name,
-		Version:   descriptorV2.Component.Version,
-		Provider:  descriptorV2.Component.Provider,
-		Identity:  identity.String(),
-	}, nil
-}
-
-func serializeVertexToDescriptor(vertex *dag.Vertex[string]) (any, error) {
-	untypedDescriptor, ok := vertex.Attributes[constructor.AttributeDescriptor]
-	if !ok {
-		return nil, fmt.Errorf("vertex %s has no %s attribute", vertex.ID, constructor.AttributeDescriptor)
-	}
-	desc, ok := untypedDescriptor.(*descriptor.Descriptor)
-	if !ok {
-		return nil, fmt.Errorf("expected vertex %s attribute %s to be of type %T, got type %T", vertex.ID, constructor.AttributeDescriptor, &descriptor.Descriptor{}, untypedDescriptor)
-	}
-	descriptorV2, err := descriptor.ConvertToV2(descriptorv2.Scheme, desc)
-	if err != nil {
-		return nil, fmt.Errorf("converting descriptor to v2 failed: %w", err)
-	}
-	return descriptorV2, nil
-}
-
-func serializeVerticesToTable(writer io.Writer, vertices []*dag.Vertex[string]) error {
-	t := table.NewWriter()
-	t.SetOutputMirror(writer)
-	t.AppendHeader(table.Row{"Component", "Version", "Provider"})
-	for _, vertex := range vertices {
-		untypedDescriptor, ok := vertex.Attributes[constructor.AttributeDescriptor]
-		if !ok {
-			return fmt.Errorf("vertex %s has no %s attribute", vertex.ID, constructor.AttributeDescriptor)
-		}
-		desc, ok := untypedDescriptor.(*descriptor.Descriptor)
-		if !ok {
-			return fmt.Errorf("expected vertex %s attribute %s to be of type %T, got type %T", vertex.ID, constructor.AttributeDescriptor, &descriptor.Descriptor{}, desc)
-		}
-
-		t.AppendRow(table.Row{desc.Component.Name, desc.Component.Version, desc.Component.Provider.Name})
-	}
-	t.SetColumnConfigs([]table.ColumnConfig{
-		{Number: 1, AutoMerge: true},
-		{Number: 3, AutoMerge: true},
-	})
-	style := table.StyleLight
-	style.Options.DrawBorder = false
-	t.SetStyle(style)
-	t.Render()
-	return nil
 }

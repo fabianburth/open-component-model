@@ -163,47 +163,33 @@ func processConstructorComponent(
 		"resources", len(component.Resources), "sources", len(component.Sources),
 		"references", len(component.References), "id", baseID)
 
-	// Convert constructor component to v2 descriptor for environment.
-	// Resources/sources with inputs but no access need a placeholder access
-	// so the descriptor conversion succeeds. The real access is set at runtime
-	// by AddLocalResource/AddLocalSource transformations.
+	// Default empty resource/source versions and relations on a copy
+	// so the original component is not mutated.
 	compCopy := *component
 	compCopy.Resources = make([]constructor.Resource, len(component.Resources))
 	copy(compCopy.Resources, component.Resources)
-	placeholderAccess := &runtime.Raw{
-		Type: runtime.NewVersionedType("localBlob", "v1"),
-		Data: json.RawMessage(`{"type":"localBlob/v1"}`),
-	}
 	for i := range compCopy.Resources {
-		if compCopy.Resources[i].HasInput() && !compCopy.Resources[i].HasAccess() {
-			compCopy.Resources[i].AccessOrInput.Access = placeholderAccess
-		}
-		// Default empty resource version to component version
 		if compCopy.Resources[i].Version == "" {
 			compCopy.Resources[i].Version = component.Version
+		}
+		if compCopy.Resources[i].Relation == "" {
+			if compCopy.Resources[i].HasInput() {
+				compCopy.Resources[i].Relation = constructor.LocalRelation
+			} else {
+				compCopy.Resources[i].Relation = constructor.ExternalRelation
+			}
 		}
 	}
 	compCopy.Sources = make([]constructor.Source, len(component.Sources))
 	copy(compCopy.Sources, component.Sources)
 	for i := range compCopy.Sources {
-		if compCopy.Sources[i].HasInput() && !compCopy.Sources[i].HasAccess() {
-			compCopy.Sources[i].AccessOrInput.Access = placeholderAccess
-		}
-		// Default empty source version to component version
 		if compCopy.Sources[i].Version == "" {
 			compCopy.Sources[i].Version = component.Version
 		}
 	}
 
-	desc := constructor.ConvertToDescriptor(&constructor.ComponentConstructor{
-		Components: []constructor.Component{compCopy},
-	})
-	v2desc, err := descruntime.ConvertToV2(runtime.NewScheme(runtime.WithAllowUnknown()), desc)
-	if err != nil {
-		return fmt.Errorf("cannot convert to v2 descriptor: %w", err)
-	}
-
-	if err := addDescriptorToEnvironment(v2desc, baseID, tgd); err != nil {
+	// Store the constructor component (with input specs preserved) in the environment.
+	if err := addConstructorToEnvironment(&compCopy, baseID, tgd); err != nil {
 		return err
 	}
 
@@ -250,8 +236,8 @@ func processConstructorComponent(
 		}
 	}
 
-	// Build the upload transformation
-	if err := addUploadTransformation(v2desc, baseID, targetRepoSpec, toRepo, tgd, resourceTransformIDs, sourceTransformIDs, referenceDigestIDs); err != nil {
+	// Build the upload transformation using constructor-aware descriptor assembly.
+	if err := addConstructorUploadTransformation(&compCopy, baseID, targetRepoSpec, toRepo, tgd, resourceTransformIDs, sourceTransformIDs, referenceDigestIDs); err != nil {
 		return err
 	}
 
@@ -370,6 +356,7 @@ func processExternalComponent(
 }
 
 // addDescriptorToEnvironment marshals the v2 descriptor and adds it to the graph environment.
+// Used for external components that are already in descriptor format.
 func addDescriptorToEnvironment(v2desc *descriptorv2.Descriptor, id string, tgd *transformv1alpha1.TransformationGraphDefinition) error {
 	rawV2Desc, err := json.Marshal(v2desc)
 	if err != nil {
@@ -380,6 +367,26 @@ func addDescriptorToEnvironment(v2desc *descriptorv2.Descriptor, id string, tgd 
 		return fmt.Errorf("cannot unmarshal v2 descriptor: %w", err)
 	}
 	tgd.Environment.Data[id] = mapDesc
+	return nil
+}
+
+// addConstructorToEnvironment converts the runtime constructor component to v1 spec format
+// and stores it in the graph environment, preserving input specifications.
+func addConstructorToEnvironment(component *constructor.Component, id string, tgd *transformv1alpha1.TransformationGraphDefinition) error {
+	v1comp, err := constructor.ConvertToV1Component(component)
+	if err != nil {
+		return fmt.Errorf("cannot convert constructor component to v1: %w", err)
+	}
+
+	rawComp, err := json.Marshal(v1comp)
+	if err != nil {
+		return fmt.Errorf("cannot marshal constructor component: %w", err)
+	}
+	mapComp := make(map[string]any)
+	if err := json.Unmarshal(rawComp, &mapComp); err != nil {
+		return fmt.Errorf("cannot unmarshal constructor component: %w", err)
+	}
+	tgd.Environment.Data[id] = mapComp
 	return nil
 }
 
@@ -430,6 +437,41 @@ func addUploadTransformation(
 	referenceDigestIDs map[int]string,
 ) error {
 	descriptorSpec := buildDescriptorSpec(v2desc, baseID, resourceTransformIDs, sourceTransformIDs, referenceDigestIDs)
+
+	addType, err := chooseAddType(targetRepoSpec)
+	if err != nil {
+		return fmt.Errorf("choosing add type for target repository: %w", err)
+	}
+
+	upload := transformv1alpha1.GenericTransformation{
+		TransformationMeta: meta.TransformationMeta{
+			Type: addType,
+			ID:   baseID + "Upload",
+		},
+		Spec: &runtime.Unstructured{Data: map[string]any{
+			"repository": toRepo.Data,
+			"descriptor": descriptorSpec,
+		}},
+	}
+
+	tgd.Transformations = append(tgd.Transformations, upload)
+	return nil
+}
+
+// addConstructorUploadTransformation creates the AddComponentVersion upload transformation
+// for constructor components. It assembles a v2-compatible descriptor from constructor
+// environment data using CEL expression references.
+func addConstructorUploadTransformation(
+	component *constructor.Component,
+	baseID string,
+	targetRepoSpec runtime.Typed,
+	toRepo *runtime.Unstructured,
+	tgd *transformv1alpha1.TransformationGraphDefinition,
+	resourceTransformIDs map[int]string,
+	sourceTransformIDs map[int]string,
+	referenceDigestIDs map[int]string,
+) error {
+	descriptorSpec := buildConstructorDescriptorSpec(component, baseID, resourceTransformIDs, sourceTransformIDs, referenceDigestIDs, tgd)
 
 	addType, err := chooseAddType(targetRepoSpec)
 	if err != nil {
@@ -546,6 +588,143 @@ func buildDescriptorSpec(
 	}
 
 	return descSpecMap
+}
+
+// buildConstructorDescriptorSpec constructs a v2-compatible descriptor specification
+// from constructor component data stored in the environment. The constructor v1 spec
+// has a different field layout than the v2 descriptor, so this function maps between them:
+//   - Constructor fields are at the top level (name, version, provider, resources, etc.)
+//   - v2 descriptor wraps them under meta + component
+//   - Constructor provider is {name, labels} while v2 is a plain string
+//   - Constructor has no meta, repositoryContexts, or signatures
+func buildConstructorDescriptorSpec(
+	component *constructor.Component,
+	id string,
+	resourceTransformIDs map[int]string,
+	sourceTransformIDs map[int]string,
+	referenceDigestIDs map[int]string,
+	tgd *transformv1alpha1.TransformationGraphDefinition,
+) any {
+	// Build resources array
+	// For resources handled by AddLocalResource, reference the transformation output.
+	// For by-reference resources, store them individually in the environment as v2-compatible
+	// entries to avoid CEL type inference issues with heterogeneous arrays (input vs access).
+	resourcesArray := make([]any, len(component.Resources))
+	for i := range component.Resources {
+		if addID, ok := resourceTransformIDs[i]; ok {
+			resourcesArray[i] = fmt.Sprintf("${%s.output.resource}", addID)
+		} else {
+			resEnvKey := fmt.Sprintf("%sResource%d", id, i)
+			relation := component.Resources[i].Relation
+			resMap := map[string]any{
+				"name":     component.Resources[i].Name,
+				"version":  component.Resources[i].Version,
+				"type":     component.Resources[i].Type,
+				"relation": string(relation),
+			}
+			if component.Resources[i].HasAccess() {
+				accessData, err := json.Marshal(component.Resources[i].Access)
+				if err == nil {
+					var accessMap map[string]any
+					if err := json.Unmarshal(accessData, &accessMap); err == nil {
+						resMap["access"] = accessMap
+					}
+				}
+			}
+			if component.Resources[i].ExtraIdentity != nil {
+				resMap["extraIdentity"] = map[string]string(component.Resources[i].ExtraIdentity)
+			}
+			tgd.Environment.Data[resEnvKey] = resMap
+			resourcesArray[i] = fmt.Sprintf("${environment.%s}", resEnvKey)
+		}
+	}
+
+	// Build sources array
+	// Same pattern: store by-reference sources as individual environment entries.
+	var sourcesSpec any
+	if len(component.Sources) > 0 {
+		sourcesArray := make([]any, len(component.Sources))
+		for i := range component.Sources {
+			if addID, ok := sourceTransformIDs[i]; ok {
+				sourcesArray[i] = fmt.Sprintf("${%s.output.source}", addID)
+			} else {
+				srcEnvKey := fmt.Sprintf("%sSource%d", id, i)
+				srcMap := map[string]any{
+					"name":    component.Sources[i].Name,
+					"version": component.Sources[i].Version,
+					"type":    component.Sources[i].Type,
+				}
+				if component.Sources[i].HasAccess() {
+					accessData, err := json.Marshal(component.Sources[i].Access)
+					if err == nil {
+						var accessMap map[string]any
+						if err := json.Unmarshal(accessData, &accessMap); err == nil {
+							srcMap["access"] = accessMap
+						}
+					}
+				}
+				if component.Sources[i].ExtraIdentity != nil {
+					srcMap["extraIdentity"] = map[string]string(component.Sources[i].ExtraIdentity)
+				}
+				tgd.Environment.Data[srcEnvKey] = srcMap
+				sourcesArray[i] = fmt.Sprintf("${environment.%s}", srcEnvKey)
+			}
+		}
+		sourcesSpec = sourcesArray
+	} else {
+		sourcesSpec = nil
+	}
+
+	// Build references array
+	var referencesSpec any
+	if len(component.References) > 0 {
+		refsArray := make([]any, len(component.References))
+		for i, ref := range component.References {
+			if digestID, ok := referenceDigestIDs[i]; ok {
+				refMap := map[string]any{
+					"name":          fmt.Sprintf("${environment.%s.componentReferences[%d].name}", id, i),
+					"version":       fmt.Sprintf("${environment.%s.componentReferences[%d].version}", id, i),
+					"componentName": fmt.Sprintf("${environment.%s.componentReferences[%d].componentName}", id, i),
+					"digest":        fmt.Sprintf("${%s.output.digest}", digestID),
+				}
+				if ref.ExtraIdentity != nil {
+					refMap["extraIdentity"] = fmt.Sprintf("${environment.%s.componentReferences[%d].extraIdentity}", id, i)
+				}
+				if ref.Labels != nil {
+					refMap["labels"] = fmt.Sprintf("${environment.%s.componentReferences[%d].labels}", id, i)
+				}
+				refsArray[i] = refMap
+			} else {
+				refsArray[i] = fmt.Sprintf("${environment.%s.componentReferences[%d]}", id, i)
+			}
+		}
+		referencesSpec = refsArray
+	} else {
+		referencesSpec = nil
+	}
+
+	componentMap := map[string]any{
+		"name":                fmt.Sprintf("${environment.%s.name}", id),
+		"version":             fmt.Sprintf("${environment.%s.version}", id),
+		"provider":            fmt.Sprintf("${environment.%s.provider.name}", id),
+		"resources":           resourcesArray,
+		"sources":             sourcesSpec,
+		"componentReferences": referencesSpec,
+		"repositoryContexts":  nil,
+	}
+
+	if component.CreationTime != "" {
+		componentMap["creationTime"] = fmt.Sprintf("${environment.%s.creationTime}", id)
+	}
+
+	if len(component.Labels) > 0 {
+		componentMap["labels"] = fmt.Sprintf("${environment.%s.labels}", id)
+	}
+
+	return map[string]any{
+		"meta":      map[string]any{"schemaVersion": "v2"},
+		"component": componentMap,
+	}
 }
 
 // resourceToMap converts a descriptor Resource to map[string]any for embedding in unstructured specs.

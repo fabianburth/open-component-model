@@ -111,8 +111,32 @@ func TestBuildGraphDefinition_SimpleComponent(t *testing.T) {
 	r.Contains(types, "OCIAddComponentVersion/v1alpha1")
 	r.Contains(types, "ComputeComponentDigest/v1alpha1")
 
-	// Verify environment has the component descriptor
+	// Verify environment has the component in constructor format (not descriptor format)
 	r.NotEmpty(tgd.Environment.Data)
+	envData, ok := tgd.Environment.Data["constructExampleComMyComponent100"].(map[string]any)
+	r.True(ok, "environment should contain constructor component data")
+
+	// Constructor format: fields at top level (not nested under "component")
+	r.Equal("example.com/my-component", envData["name"])
+	r.Equal("1.0.0", envData["version"])
+
+	// Provider should be an object with "name", not a plain string
+	provider, ok := envData["provider"].(map[string]any)
+	r.True(ok, "provider should be an object")
+	r.Equal("test-provider", provider["name"])
+
+	// No "meta" or "component" wrapper — these are v2 descriptor artifacts
+	r.Nil(envData["meta"], "constructor format should not have meta")
+	r.Nil(envData["component"], "constructor format should not have component wrapper")
+
+	// Resource should preserve the input specification, not have a placeholder access
+	resources, ok := envData["resources"].([]any)
+	r.True(ok, "resources should be an array")
+	r.Len(resources, 1)
+	res, ok := resources[0].(map[string]any)
+	r.True(ok)
+	r.NotNil(res["input"], "resource should preserve input spec")
+	r.Nil(res["access"], "resource with input should not have a placeholder access")
 }
 
 func TestBuildGraphDefinition_ComponentWithSource(t *testing.T) {
@@ -476,4 +500,94 @@ func (m *mockComponentVersionRepo) GetLocalResource(_ context.Context, _, _ stri
 
 func (m *mockComponentVersionRepo) GetLocalSource(_ context.Context, _, _ string, _ runtime.Identity) (blob.ReadOnlyBlob, *descriptor.Source, error) {
 	return nil, nil, nil
+}
+
+func TestBuildGraphDefinition_MixedInputAndAccessResources(t *testing.T) {
+	r := require.New(t)
+	ctx := context.Background()
+
+	fileInput := &runtime.Raw{
+		Type: runtime.NewVersionedType("file", "v1"),
+		Data: json.RawMessage(`{"path":"data.txt","mediaType":"text/plain"}`),
+	}
+	ociAccess := &runtime.Raw{
+		Type: runtime.NewVersionedType("ociImage", "v1"),
+		Data: json.RawMessage(`{"imageReference":"ghcr.io/test/image:1.0.0"}`),
+	}
+
+	cc := &constructor.ComponentConstructor{
+		Components: []constructor.Component{
+			{
+				ComponentMeta: constructor.ComponentMeta{
+					ObjectMeta: constructor.ObjectMeta{
+						Name:    "example.com/mixed",
+						Version: "1.0.0",
+					},
+				},
+				Provider: constructor.Provider{Name: "test-provider"},
+				Resources: []constructor.Resource{
+					{
+						ElementMeta: constructor.ElementMeta{
+							ObjectMeta: constructor.ObjectMeta{
+								Name:    "local-resource",
+								Version: "1.0.0",
+							},
+						},
+						Type:     "blob",
+						Relation: constructor.LocalRelation,
+						AccessOrInput: constructor.AccessOrInput{
+							Input: fileInput,
+						},
+					},
+					{
+						ElementMeta: constructor.ElementMeta{
+							ObjectMeta: constructor.ObjectMeta{
+								Name:    "external-image",
+								Version: "1.0.0",
+							},
+						},
+						Type:     "ociImage",
+						Relation: constructor.ExternalRelation,
+						AccessOrInput: constructor.AccessOrInput{
+							Access: ociAccess,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	target := &oci.Repository{
+		Type:    runtime.NewVersionedType("OCIRepository", "v1"),
+		BaseUrl: "ghcr.io/test",
+	}
+
+	tgd, err := graph.BuildGraphDefinition(ctx, cc, target, "/tmp/workdir", nil,
+		graph.ExternalComponentVersionCopyPolicySkip,
+		graph.ComponentVersionConflictReplace, false)
+	r.NoError(err)
+	r.NotNil(tgd)
+
+	// Should have: FileInput + AddLocalResource + AddComponentVersion + ComputeComponentDigest
+	r.Len(tgd.Transformations, 4)
+
+	// Verify environment preserves both input and access correctly
+	envData, ok := tgd.Environment.Data["constructExampleComMixed100"].(map[string]any)
+	r.True(ok, "environment should contain constructor component data")
+
+	resources, ok := envData["resources"].([]any)
+	r.True(ok)
+	r.Len(resources, 2)
+
+	// First resource (input-based) should have input, no access
+	inputRes, ok := resources[0].(map[string]any)
+	r.True(ok)
+	r.NotNil(inputRes["input"], "input resource should preserve input spec")
+	r.Nil(inputRes["access"], "input resource should not have access")
+
+	// Second resource (access-based) should have access, no input
+	accessRes, ok := resources[1].(map[string]any)
+	r.True(ok)
+	r.Nil(accessRes["input"], "access resource should not have input")
+	r.NotNil(accessRes["access"], "access resource should preserve access spec")
 }

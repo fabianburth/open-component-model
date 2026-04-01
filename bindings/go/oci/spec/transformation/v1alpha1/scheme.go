@@ -7,18 +7,19 @@ import (
 var Scheme = runtime.NewScheme()
 
 var (
-	OCIGetComponentVersionV1alpha1 = runtime.NewVersionedType(OCIGetComponentVersionType, Version)
-	OCIAddComponentVersionV1alpha1 = runtime.NewVersionedType(OCIAddComponentVersionType, Version)
-	OCIAddLocalResourceV1alpha1    = runtime.NewVersionedType(OCIAddLocalResourceType, Version)
-	OCIAddLocalSourceV1alpha1      = runtime.NewVersionedType(OCIAddLocalSourceType, Version)
-	OCIGetLocalResourceV1alpha1    = runtime.NewVersionedType(OCIGetLocalResourceType, Version)
-	GetOCIArtifactV1alpha1         = runtime.NewVersionedType(GetOCIArtifactType, Version)
-	CTFGetComponentVersionV1alpha1 = runtime.NewVersionedType(CTFGetComponentVersionType, Version)
-	CTFAddComponentVersionV1alpha1 = runtime.NewVersionedType(CTFAddComponentVersionType, Version)
-	CTFAddLocalResourceV1alpha1    = runtime.NewVersionedType(CTFAddLocalResourceType, Version)
-	CTFAddLocalSourceV1alpha1      = runtime.NewVersionedType(CTFAddLocalSourceType, Version)
-	CTFGetLocalResourceV1alpha1    = runtime.NewVersionedType(CTFGetLocalResourceType, Version)
-	AddOCIArtifactV1alpha1         = runtime.NewVersionedType(AddOCIArtifactType, Version)
+	OCIGetComponentVersionV1alpha1   = runtime.NewVersionedType(OCIGetComponentVersionType, Version)
+	OCIAddComponentVersionV1alpha1   = runtime.NewVersionedType(OCIAddComponentVersionType, Version)
+	OCIAddLocalResourceV1alpha1      = runtime.NewVersionedType(OCIAddLocalResourceType, Version)
+	OCIAddLocalSourceV1alpha1        = runtime.NewVersionedType(OCIAddLocalSourceType, Version)
+	OCIGetLocalResourceV1alpha1      = runtime.NewVersionedType(OCIGetLocalResourceType, Version)
+	GetOCIArtifactV1alpha1           = runtime.NewVersionedType(GetOCIArtifactType, Version)
+	CTFGetComponentVersionV1alpha1   = runtime.NewVersionedType(CTFGetComponentVersionType, Version)
+	CTFAddComponentVersionV1alpha1   = runtime.NewVersionedType(CTFAddComponentVersionType, Version)
+	CTFAddLocalResourceV1alpha1      = runtime.NewVersionedType(CTFAddLocalResourceType, Version)
+	CTFAddLocalSourceV1alpha1        = runtime.NewVersionedType(CTFAddLocalSourceType, Version)
+	CTFGetLocalResourceV1alpha1      = runtime.NewVersionedType(CTFGetLocalResourceType, Version)
+	AddOCIArtifactV1alpha1           = runtime.NewVersionedType(AddOCIArtifactType, Version)
+	ProcessOCIResourceDigestV1alpha1 = runtime.NewVersionedType(ProcessOCIResourceDigestType, Version)
 )
 
 func init() {
@@ -34,4 +35,5 @@ func init() {
 	Scheme.MustRegisterWithAlias(&CTFAddLocalSource{}, CTFAddLocalSourceV1alpha1)
 	Scheme.MustRegisterWithAlias(&CTFGetLocalResource{}, CTFGetLocalResourceV1alpha1)
 	Scheme.MustRegisterWithAlias(&AddOCIArtifact{}, AddOCIArtifactV1alpha1)
+	Scheme.MustRegisterWithAlias(&ProcessOCIResourceDigest{}, ProcessOCIResourceDigestV1alpha1)
 }

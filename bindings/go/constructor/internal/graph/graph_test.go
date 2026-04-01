@@ -247,13 +247,14 @@ func TestBuildGraphDefinition_ComponentWithByReferenceResource(t *testing.T) {
 		graph.ComponentVersionConflictReplace, false)
 	r.NoError(err)
 
-	// By-reference resource: only AddComponentVersion + ComputeComponentDigest
-	r.Len(tgd.Transformations, 2)
+	// By-reference resource: ProcessOCIResourceDigest + AddComponentVersion + ComputeComponentDigest
+	r.Len(tgd.Transformations, 3)
 
 	types := make([]string, len(tgd.Transformations))
 	for i, t := range tgd.Transformations {
 		types[i] = t.Type.String()
 	}
+	r.Contains(types, "ProcessOCIResourceDigest/v1alpha1")
 	r.Contains(types, "OCIAddComponentVersion/v1alpha1")
 	r.Contains(types, "ComputeComponentDigest/v1alpha1")
 }
@@ -568,8 +569,8 @@ func TestBuildGraphDefinition_MixedInputAndAccessResources(t *testing.T) {
 	r.NoError(err)
 	r.NotNil(tgd)
 
-	// Should have: FileInput + AddLocalResource + AddComponentVersion + ComputeComponentDigest
-	r.Len(tgd.Transformations, 4)
+	// Should have: FileInput + AddLocalResource + ProcessOCIResourceDigest + AddComponentVersion + ComputeComponentDigest
+	r.Len(tgd.Transformations, 5)
 
 	// Verify environment preserves both input and access correctly
 	envData, ok := tgd.Environment.Data["constructExampleComMixed100"].(map[string]any)

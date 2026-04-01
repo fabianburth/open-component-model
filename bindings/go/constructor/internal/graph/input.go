@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	constructor "ocm.software/open-component-model/bindings/go/constructor/runtime"
+	ociv1alpha1 "ocm.software/open-component-model/bindings/go/oci/spec/transformation/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/runtime"
 	transformv1alpha1 "ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1/meta"
@@ -31,6 +32,7 @@ func processResourceTransformations(
 	toRepo *runtime.Unstructured,
 	component, version string,
 	workingDirectory string,
+	skipDigestProcessing bool,
 ) (string, error) {
 	resourceIdentity := resource.ToIdentity()
 	resourceID := identityToTransformationID(resourceIdentity)
@@ -111,13 +113,55 @@ func processResourceTransformations(
 
 	case resource.HasAccess():
 		// Resource has access specification — no input transformation needed.
-		// By-reference resources don't need any transformation — they're in the environment descriptor.
 		// By-value resources will be handled in a future iteration if needed (via Get+Add chain like transfer).
 		if resource.CopyPolicy == constructor.CopyPolicyByValue {
 			// TODO: Implement by-value resource processing via Get+Add chain
 			return "", fmt.Errorf("by-value resource processing via transformation graph is not yet implemented for resource %q", resourceIdentity)
 		}
-		// By-reference: nothing to do, the resource stays in the environment descriptor as-is
+
+		// For by-reference resources, emit a digest processing transformation
+		// if digest processing is enabled and the access type is supported.
+		if !skipDigestProcessing && isOCIAccessType(resource.Access.GetType()) {
+			digestID := fmt.Sprintf("%sDigest%s", baseID, resourceID)
+
+			// Build a v2-style resource map for the spec
+			resourceVersion := resource.Version
+			if resourceVersion == "" {
+				resourceVersion = version
+			}
+			resMap := map[string]any{
+				"name":     resource.Name,
+				"version":  resourceVersion,
+				"type":     resource.Type,
+				"relation": string(resource.Relation),
+			}
+			if resource.ExtraIdentity != nil {
+				resMap["extraIdentity"] = map[string]string(resource.ExtraIdentity)
+			}
+			if resource.HasAccess() {
+				accessData, err := json.Marshal(resource.Access)
+				if err == nil {
+					var accessMap map[string]any
+					if err := json.Unmarshal(accessData, &accessMap); err == nil {
+						resMap["access"] = accessMap
+					}
+				}
+			}
+
+			digestTransform := transformv1alpha1.GenericTransformation{
+				TransformationMeta: meta.TransformationMeta{
+					Type: ociv1alpha1.ProcessOCIResourceDigestV1alpha1,
+					ID:   digestID,
+				},
+				Spec: &runtime.Unstructured{Data: map[string]any{
+					"resource": resMap,
+				}},
+			}
+			tgd.Transformations = append(tgd.Transformations, digestTransform)
+			return digestID, nil
+		}
+
+		// No digest processing — resource stays in the environment as-is
 		return "", nil
 
 	default:

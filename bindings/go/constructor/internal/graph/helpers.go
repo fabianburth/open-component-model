@@ -106,3 +106,20 @@ func chooseGetLocalResourceType(repo runtime.Typed) (runtime.Type, error) {
 		return runtime.Type{}, fmt.Errorf("unsupported repository type %T for get local resource operation", repo)
 	}
 }
+
+// ociAccessTypeNames lists the access type names that are handled by the OCI
+// resource digest processor. These cover the canonical type ("OCIImage") as well
+// as all legacy aliases registered in the OCI access scheme.
+var ociAccessTypeNames = map[string]struct{}{
+	"OCIImage":    {},
+	"ociArtifact": {},
+	"ociRegistry": {},
+	"ociImage":    {},
+}
+
+// isOCIAccessType returns true if the given access type is an OCI image access
+// type that can be processed by the OCI resource digest processor.
+func isOCIAccessType(t runtime.Type) bool {
+	_, ok := ociAccessTypeNames[t.Name]
+	return ok
+}

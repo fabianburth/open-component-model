@@ -25,6 +25,7 @@ import (
 func NewDefaultBuilder(
 	repoProvider repository.ComponentVersionRepositoryProvider,
 	credentialProvider credentials.Resolver,
+	digestProcessor repository.ResourceDigestProcessor,
 ) *builder.Builder {
 	transformerScheme := runtime.NewScheme()
 	transformerScheme.MustRegisterScheme(ociv1alpha1.Scheme)
@@ -75,7 +76,7 @@ func NewDefaultBuilder(
 	// Constructor-specific transformers
 	computeDigest := &constructortransformer.ComputeComponentDigest{Scheme: transformerScheme}
 
-	return builder.NewBuilder(transformerScheme).
+	b := builder.NewBuilder(transformerScheme).
 		// OCI/CTF component version operations
 		WithTransformer(&ociv1alpha1.OCIAddComponentVersion{}, ociAdd).
 		WithTransformer(&ociv1alpha1.CTFAddComponentVersion{}, ociAdd).
@@ -94,4 +95,16 @@ func NewDefaultBuilder(
 		WithTransformer(&helmv1alpha1.HelmInput{}, helmInput).
 		// Constructor-specific transformers
 		WithTransformer(&constructorv1alpha1.ComputeComponentDigest{}, computeDigest)
+
+	// Resource digest processing (optional — only when a processor is provided)
+	if digestProcessor != nil {
+		processDigest := &ocitransformer.ProcessResourceDigest{
+			Scheme:             transformerScheme,
+			DigestProcessor:    digestProcessor,
+			CredentialProvider: credentialProvider,
+		}
+		b = b.WithTransformer(&ociv1alpha1.ProcessOCIResourceDigest{}, processDigest)
+	}
+
+	return b
 }

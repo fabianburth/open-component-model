@@ -200,9 +200,9 @@ func processConstructorComponent(
 
 	// Process resources
 	resourceTransformIDs := make(map[int]string)
-	for i, resource := range component.Resources {
+	for i, resource := range compCopy.Resources {
 		addID, err := processResourceTransformations(
-			baseID, i, &resource, tgd, targetRepoSpec, toRepo, component.Name, component.Version, workingDirectory,
+			baseID, i, &resource, tgd, targetRepoSpec, toRepo, compCopy.Name, compCopy.Version, workingDirectory, skipDigestProcessing,
 		)
 		if err != nil {
 			return fmt.Errorf("error processing resource %q: %w", resource.ToIdentity(), err)
@@ -214,9 +214,9 @@ func processConstructorComponent(
 
 	// Process sources
 	sourceTransformIDs := make(map[int]string)
-	for i, source := range component.Sources {
+	for i, source := range compCopy.Sources {
 		addID, err := processSourceTransformations(
-			baseID, i, &source, tgd, targetRepoSpec, toRepo, component.Name, component.Version, workingDirectory,
+			baseID, i, &source, tgd, targetRepoSpec, toRepo, compCopy.Name, compCopy.Version, workingDirectory,
 		)
 		if err != nil {
 			return fmt.Errorf("error processing source %q: %w", source.ToIdentity(), err)

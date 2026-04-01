@@ -18,6 +18,7 @@ import (
 	constructorruntime "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/spec/v1"
 	"ocm.software/open-component-model/bindings/go/oci/compref"
+	ocires "ocm.software/open-component-model/bindings/go/oci/repository/resource"
 	ctfv1 "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/ctf"
 	ociv1 "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/oci"
 	"ocm.software/open-component-model/bindings/go/repository"
@@ -357,7 +358,11 @@ func AddComponentVersion(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Build transformer builder
-	b := constructor.NewDefaultBuilder(pm.ComponentVersionRepositoryRegistry, credGraph)
+	var digestProcessor repository.ResourceDigestProcessor
+	if !skipReferenceDigestProcessing {
+		digestProcessor = ocires.NewResourceRepository(octx.FilesystemConfig())
+	}
+	b := constructor.NewDefaultBuilder(pm.ComponentVersionRepositoryRegistry, credGraph, digestProcessor)
 	graph, err := b.
 		WithEvents(make(chan graphRuntime.ProgressEvent, eventBufferSize)).
 		BuildAndCheck(tgd)

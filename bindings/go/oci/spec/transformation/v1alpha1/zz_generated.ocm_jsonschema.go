@@ -117,6 +117,15 @@ var schemaOCIGetLocalResourceOutput []byte
 //go:embed schemas/OCIGetLocalResourceSpec.schema.json
 var schemaOCIGetLocalResourceSpec []byte
 
+//go:embed schemas/ProcessOCIResourceDigest.schema.json
+var schemaProcessOCIResourceDigest []byte
+
+//go:embed schemas/ProcessOCIResourceDigestOutput.schema.json
+var schemaProcessOCIResourceDigestOutput []byte
+
+//go:embed schemas/ProcessOCIResourceDigestSpec.schema.json
+var schemaProcessOCIResourceDigestSpec []byte
+
 // JSONSchema returns the JSON Schema for AddOCIArtifact.
 func (AddOCIArtifact) JSONSchema() []byte {
 	return schemaAddOCIArtifact
@@ -295,4 +304,19 @@ func (OCIGetLocalResourceOutput) JSONSchema() []byte {
 // JSONSchema returns the JSON Schema for OCIGetLocalResourceSpec.
 func (OCIGetLocalResourceSpec) JSONSchema() []byte {
 	return schemaOCIGetLocalResourceSpec
+}
+
+// JSONSchema returns the JSON Schema for ProcessOCIResourceDigest.
+func (ProcessOCIResourceDigest) JSONSchema() []byte {
+	return schemaProcessOCIResourceDigest
+}
+
+// JSONSchema returns the JSON Schema for ProcessOCIResourceDigestOutput.
+func (ProcessOCIResourceDigestOutput) JSONSchema() []byte {
+	return schemaProcessOCIResourceDigestOutput
+}
+
+// JSONSchema returns the JSON Schema for ProcessOCIResourceDigestSpec.
+func (ProcessOCIResourceDigestSpec) JSONSchema() []byte {
+	return schemaProcessOCIResourceDigestSpec
 }

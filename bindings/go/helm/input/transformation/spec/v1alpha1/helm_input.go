@@ -37,6 +37,8 @@ type HelmInputOutput struct {
 // +k8s:deepcopy-gen=true
 // +ocm:jsonschema-gen=true
 type HelmInputSpec struct {
+	// Resource is the resource descriptor this input belongs to.
+	Resource *v2.Resource `json:"resource,omitempty"`
 	// Path is the path to the directory or tgz file containing the chart on the local filesystem.
 	Path string `json:"path,omitempty"`
 	// Repository is an OCI reference specifying the upload location of the fetched chart.

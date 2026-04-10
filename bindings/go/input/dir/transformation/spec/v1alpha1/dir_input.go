@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	"ocm.software/open-component-model/bindings/go/blob/filesystem/spec/access/v1alpha1"
+	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 
@@ -27,12 +28,16 @@ type DirInput struct {
 type DirInputOutput struct {
 	// File is the file access specification for the produced blob.
 	File v1alpha1.File `json:"file"`
+	// Resource is the resource descriptor this input belongs to.
+	Resource *v2.Resource `json:"resource,omitempty"`
 }
 
 // DirInputSpec is the input specification for the DirInput transformation.
 // +k8s:deepcopy-gen=true
 // +ocm:jsonschema-gen=true
 type DirInputSpec struct {
+	// Resource is the resource descriptor this input belongs to.
+	Resource *v2.Resource `json:"resource,omitempty"`
 	// Path is the path to the directory on the local filesystem.
 	Path string `json:"path"`
 	// MediaType is the optional media type of the resulting blob.

@@ -93,6 +93,7 @@ func (t *HelmInput) Transform(ctx context.Context, step runtime.Typed) (runtime.
 		transformation.Output = &v1alpha1.HelmInputOutput{}
 	}
 	transformation.Output.File = *fileSpec
+	transformation.Output.Resource = spec.Resource
 
 	// If Repository is set, create a resource access pointing to the remote helm chart
 	if spec.Repository != "" {

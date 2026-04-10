@@ -41,22 +41,7 @@ func processResourceTransformations(
 
 	switch {
 	case resource.HasInput():
-		// Generate input transformation + AddLocalResource chain
-		inputType, inputSpec, err := buildInputTransformation(resource.Input, workingDirectory)
-		if err != nil {
-			return "", fmt.Errorf("error building input transformation: %w", err)
-		}
-
-		inputTransform := transformv1alpha1.GenericTransformation{
-			TransformationMeta: meta.TransformationMeta{
-				Type: inputType,
-				ID:   inputID,
-			},
-			Spec: inputSpec,
-		}
-		tgd.Transformations = append(tgd.Transformations, inputTransform)
-
-		// Build a v2-style resource map for the AddLocalResource spec.
+		// Build a v2-style resource map for the resource descriptor.
 		// We construct the map directly since descriptor.runtime.Resource uses json:"-" tags.
 		resourceVersion := resource.Version
 		if resourceVersion == "" {
@@ -88,6 +73,21 @@ func processResourceTransformations(
 			}
 			resourceMap["labels"] = labels
 		}
+
+		// Generate input transformation + AddLocalResource chain
+		inputType, inputSpec, err := buildInputTransformation(resource.Input, workingDirectory, resourceMap)
+		if err != nil {
+			return "", fmt.Errorf("error building input transformation: %w", err)
+		}
+
+		inputTransform := transformv1alpha1.GenericTransformation{
+			TransformationMeta: meta.TransformationMeta{
+				Type: inputType,
+				ID:   inputID,
+			},
+			Spec: inputSpec,
+		}
+		tgd.Transformations = append(tgd.Transformations, inputTransform)
 
 		addLocalResourceType, err := chooseAddLocalResourceType(targetRepoSpec)
 		if err != nil {
@@ -170,7 +170,8 @@ func processResourceTransformations(
 }
 
 // buildInputTransformation creates the input transformation spec based on the input type.
-func buildInputTransformation(input runtime.Typed, workingDirectory string) (runtime.Type, *runtime.Unstructured, error) {
+// The resourceMap is the v2-style resource descriptor that the input belongs to.
+func buildInputTransformation(input runtime.Typed, workingDirectory string, resourceMap map[string]any) (runtime.Type, *runtime.Unstructured, error) {
 	inputType := input.GetType()
 
 	// Marshal the input to get its raw data, then build the transformation spec
@@ -208,11 +209,16 @@ func buildInputTransformation(input runtime.Typed, workingDirectory string) (run
 		return runtime.Type{}, nil, fmt.Errorf("unsupported input type %q", inputType)
 	}
 
-	// Inject workingDirectory only for input types that support it (file, dir)
+	// Inject workingDirectory only for input types that support it
 	if supportsWorkingDirectory && workingDirectory != "" {
 		if wd, ok := inputMap["workingDirectory"]; !ok || wd == "" || wd == nil {
 			inputMap["workingDirectory"] = workingDirectory
 		}
+	}
+
+	// Inject the resource descriptor into the input spec
+	if resourceMap != nil {
+		inputMap["resource"] = resourceMap
 	}
 
 	return transformType, &runtime.Unstructured{Data: inputMap}, nil

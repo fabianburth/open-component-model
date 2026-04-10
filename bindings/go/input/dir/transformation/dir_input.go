@@ -75,6 +75,7 @@ func (t *DirInput) Transform(ctx context.Context, step runtime.Typed) (runtime.T
 		transformation.Output = &v1alpha1.DirInputOutput{}
 	}
 	transformation.Output.File = *fileSpec
+	transformation.Output.Resource = spec.Resource
 
 	return &transformation, nil
 }

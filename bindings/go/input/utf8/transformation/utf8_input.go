@@ -61,6 +61,7 @@ func (t *UTF8Input) Transform(ctx context.Context, step runtime.Typed) (runtime.
 		transformation.Output = &v1alpha1.UTF8InputOutput{}
 	}
 	transformation.Output.File = *fileSpec
+	transformation.Output.Resource = spec.Resource
 
 	return &transformation, nil
 }

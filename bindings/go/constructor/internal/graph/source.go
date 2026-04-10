@@ -31,23 +31,7 @@ func processSourceTransformations(
 	inputID := fmt.Sprintf("%sInputSrc%s", baseID, sourceID)
 	addSourceID := fmt.Sprintf("%sAddSrc%s", baseID, sourceID)
 
-	// Generate input transformation
-	inputType, inputSpec, err := buildInputTransformation(source.Input, workingDirectory)
-	if err != nil {
-		return "", fmt.Errorf("error building input transformation for source: %w", err)
-	}
-
-	inputTransform := transformv1alpha1.GenericTransformation{
-		TransformationMeta: meta.TransformationMeta{
-			Type: inputType,
-			ID:   inputID,
-		},
-		Spec: inputSpec,
-	}
-	tgd.Transformations = append(tgd.Transformations, inputTransform)
-
-	// Build a v2-style source map for the AddLocalSource spec.
-	// We construct the map directly since descriptor.runtime.Source uses json:"-" tags.
+	// Build a v2-style source map for the source descriptor.
 	sourceVersion := source.Version
 	if sourceVersion == "" {
 		sourceVersion = version // default to component version
@@ -77,6 +61,21 @@ func processSourceTransformations(
 		}
 		sourceMap["labels"] = labels
 	}
+
+	// Generate input transformation
+	inputType, inputSpec, err := buildInputTransformation(source.Input, workingDirectory, sourceMap)
+	if err != nil {
+		return "", fmt.Errorf("error building input transformation for source: %w", err)
+	}
+
+	inputTransform := transformv1alpha1.GenericTransformation{
+		TransformationMeta: meta.TransformationMeta{
+			Type: inputType,
+			ID:   inputID,
+		},
+		Spec: inputSpec,
+	}
+	tgd.Transformations = append(tgd.Transformations, inputTransform)
 
 	addLocalSourceType, err := chooseAddLocalSourceType(targetRepoSpec)
 	if err != nil {

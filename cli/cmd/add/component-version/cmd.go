@@ -26,8 +26,7 @@ import (
 	"ocm.software/open-component-model/bindings/go/runtime"
 	graphRuntime "ocm.software/open-component-model/bindings/go/transform/graph/runtime"
 	transformv1alpha1 "ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1"
-	ocmcmd "ocm.software/open-component-model/cli/cmd/internal/cmd"
-	"ocm.software/open-component-model/cli/cmd/setup/hooks"
+	"ocm.software/open-component-model/cli/cmd/setup"
 	ocmctx "ocm.software/open-component-model/cli/internal/context"
 	"ocm.software/open-component-model/cli/internal/flags/enum"
 	"ocm.software/open-component-model/cli/internal/flags/file"
@@ -203,27 +202,53 @@ add component-version --%[1]s ./archive --%[2]s %[3]s.yaml
 }
 
 func persistentPreRunE(cmd *cobra.Command, _ []string) error {
+	logger, err := log.GetBaseLogger(cmd)
+	if err != nil {
+		return fmt.Errorf("get logger: %w", err)
+	}
+	slog.SetDefault(logger)
+
+	// Load OCM config and filesystem config first so that WorkingDirectory
+	// (from the config file or CLI flag) is available before we resolve the
+	// constructor file path.
+	if err := setup.OCMConfig(cmd); err != nil {
+		return fmt.Errorf("setup ocm config: %w", err)
+	}
+	setup.FilesystemConfig(cmd, setup.FilesystemConfigOptions{})
+
 	constructorFile, err := getComponentConstructorFile(cmd)
 	if err != nil {
 		return fmt.Errorf("getting component constructor failed: %w", err)
 	}
 
-	// If the working directory isn't set yet, default to the constructorFile file's dir.
-	cfg := hooks.Config{}
+	// If the working directory still isn't set (neither CLI flag nor config
+	// file provided one), fall back to the constructor file's parent directory
+	// and re-apply the filesystem config so downstream setup (e.g. plugin
+	// manager) sees it.
 	ctx := cmd.Context()
 	if fsCfg := ocmctx.FromContext(ctx).FilesystemConfig(); fsCfg == nil || fsCfg.WorkingDirectory == "" {
 		path := constructorFile.String()
-		// if our flag is not absolute, make it absolute to pass into potential plugins
 		if path, err = filepath.Abs(path); err != nil {
 			return err
 		}
-		cfg.WorkingDirectory = filepath.Dir(path)
+		wd := filepath.Dir(path)
 		slog.DebugContext(ctx, "setting working directory from constructorFile path",
-			slog.String("working-directory", cfg.WorkingDirectory))
+			slog.String("working-directory", wd))
+		setup.FilesystemConfig(cmd, setup.FilesystemConfigOptions{WorkingDirectory: wd})
 	}
 
-	if err := hooks.PreRunEWithConfig(cmd, cfg); err != nil {
-		return fmt.Errorf("pre-run configuration for component constructors failed: %w", err)
+	// Remaining setup that depends on filesystem config being complete.
+	if err := setup.PluginManager(cmd); err != nil {
+		return fmt.Errorf("setup plugin manager: %w", err)
+	}
+	if err := setup.CredentialGraph(cmd); err != nil {
+		return fmt.Errorf("setup credential graph: %w", err)
+	}
+	ocmctx.Register(cmd)
+
+	if parent := cmd.Parent(); parent != nil {
+		cmd.SetOut(parent.OutOrStdout())
+		cmd.SetErr(parent.ErrOrStderr())
 	}
 
 	return nil
@@ -475,13 +500,12 @@ func getComponentConstructorFile(cmd *cobra.Command) (*file.Flag, error) {
 		return nil, fmt.Errorf("getting component constructor path flag failed: %w", err)
 	}
 
-	// When a --working-directory is provided and the constructor path is
-	// relative, resolve it against the working directory instead of the
-	// process cwd.  This covers both the default value and an explicit
-	// relative --constructor path.
+	// When a working directory is configured (via CLI flag or ocm config) and
+	// the constructor path is relative, resolve it against that directory
+	// instead of the process cwd.
 	if !filepath.IsAbs(constructorFlag.String()) {
-		if wdFlag := cmd.Flags().Lookup(ocmcmd.WorkingDirectoryFlag); wdFlag != nil && wdFlag.Value.String() != "" {
-			resolved := filepath.Join(wdFlag.Value.String(), constructorFlag.String())
+		if fsCfg := ocmctx.FromContext(cmd.Context()).FilesystemConfig(); fsCfg != nil && fsCfg.WorkingDirectory != "" {
+			resolved := filepath.Join(fsCfg.WorkingDirectory, constructorFlag.String())
 			if err := constructorFlag.Set(resolved); err != nil {
 				return nil, fmt.Errorf("resolving constructor path against working directory failed: %w", err)
 			}

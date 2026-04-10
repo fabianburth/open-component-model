@@ -55,6 +55,9 @@ func (t *HelmInput) Transform(ctx context.Context, step runtime.Typed) (runtime.
 
 	// Resolve credentials if credential provider is available and this is a remote chart
 	var opts []helminput.Option
+	if spec.WorkingDirectory != "" {
+		opts = append(opts, helminput.WithWorkingDirectory(spec.WorkingDirectory))
+	}
 	if t.CredentialProvider != nil && spec.HelmRepository != "" {
 		identity, err := runtime.ParseURLToIdentity(spec.HelmRepository)
 		if err == nil && identity != nil {

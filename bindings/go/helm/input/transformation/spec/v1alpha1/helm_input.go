@@ -50,6 +50,8 @@ type HelmInputSpec struct {
 	CACert string `json:"caCert,omitempty"`
 	// CACertFile is used in combination with HelmRepository to specify a relative filename for TLS root certificate.
 	CACertFile string `json:"caCertFile,omitempty"`
+	// WorkingDirectory is the base directory for resolving relative paths.
+	WorkingDirectory string `json:"workingDirectory,omitempty"`
 	// OutputPath is the optional directory path to buffer the blob file.
 	// If empty, a temporary file will be created.
 	OutputPath string `json:"outputPath,omitempty"`

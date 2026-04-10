@@ -203,6 +203,7 @@ func buildInputTransformation(input runtime.Typed, workingDirectory string) (run
 		supportsWorkingDirectory = true
 	case "helm/v1", "helm":
 		transformType = helmInputV1alpha1
+		supportsWorkingDirectory = true
 	default:
 		return runtime.Type{}, nil, fmt.Errorf("unsupported input type %q", inputType)
 	}

@@ -26,6 +26,7 @@ import (
 	"ocm.software/open-component-model/bindings/go/runtime"
 	graphRuntime "ocm.software/open-component-model/bindings/go/transform/graph/runtime"
 	transformv1alpha1 "ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1"
+	ocmcmd "ocm.software/open-component-model/cli/cmd/internal/cmd"
 	"ocm.software/open-component-model/cli/cmd/setup/hooks"
 	ocmctx "ocm.software/open-component-model/cli/internal/context"
 	"ocm.software/open-component-model/cli/internal/flags/enum"
@@ -473,6 +474,20 @@ func getComponentConstructorFile(cmd *cobra.Command) (*file.Flag, error) {
 	if err != nil {
 		return nil, fmt.Errorf("getting component constructor path flag failed: %w", err)
 	}
+
+	// When a --working-directory is provided and the constructor path is
+	// relative, resolve it against the working directory instead of the
+	// process cwd.  This covers both the default value and an explicit
+	// relative --constructor path.
+	if !filepath.IsAbs(constructorFlag.String()) {
+		if wdFlag := cmd.Flags().Lookup(ocmcmd.WorkingDirectoryFlag); wdFlag != nil && wdFlag.Value.String() != "" {
+			resolved := filepath.Join(wdFlag.Value.String(), constructorFlag.String())
+			if err := constructorFlag.Set(resolved); err != nil {
+				return nil, fmt.Errorf("resolving constructor path against working directory failed: %w", err)
+			}
+		}
+	}
+
 	if !constructorFlag.Exists() {
 		return nil, fmt.Errorf("component constructor %q does not exist", constructorFlag.String())
 	} else if constructorFlag.IsDir() {

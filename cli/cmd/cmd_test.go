@@ -974,6 +974,41 @@ resources:
 
 			r.NoError(err, "could not construct component version with working directory")
 		})
+
+		t.Run("default constructor is resolved relative to working-directory", func(t *testing.T) {
+			r := require.New(t)
+
+			// Set up a subdirectory that contains the default-named constructor file
+			// and a resource, but do NOT pass --constructor explicitly.
+			workingDir := filepath.Join(tmp, "wd-default-constructor")
+			r.NoError(os.MkdirAll(workingDir, 0o700))
+
+			resourceFile := filepath.Join(workingDir, "resource.txt")
+			r.NoError(os.WriteFile(resourceFile, []byte("hello"), 0o600))
+
+			constructorYAML := fmt.Sprintf(`
+name: ocm.software/wd-default
+version: 1.0.0
+provider:
+  name: ocm.software
+resources:
+  - name: my-res
+    type: blob
+    input:
+      type: file/v1
+      path: %s
+`, resourceFile)
+			// Write the constructor with the default name that the CLI looks for.
+			r.NoError(os.WriteFile(filepath.Join(workingDir, "component-constructor.yaml"), []byte(constructorYAML), 0o600))
+
+			wdArchive := filepath.Join(tmp, "wd-default-archive")
+			_, err := test.OCM(t, test.WithArgs("add", "cv",
+				"--repository", wdArchive,
+				"--working-directory", workingDir,
+			), test.WithErrorOutput(test.NewJSONLogReader()))
+
+			r.NoError(err, "expected default constructor to be found via --working-directory")
+		})
 	})
 	t.Run("construction with references targeting fallback resolvers", func(t *testing.T) {
 		r := require.New(t)

@@ -91,7 +91,7 @@ func processSourceTransformations(
 			"repository": toRepo.Data,
 			"component":  component,
 			"version":    version,
-			"source":     sourceMap,
+			"source":     fmt.Sprintf("${%s.output.source}", inputID),
 			"file":       fmt.Sprintf("${%s.output.file}", inputID),
 		}},
 	}

@@ -2,10 +2,10 @@ package internal
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 
+	graphinternal "ocm.software/open-component-model/bindings/go/graph/internal"
 	"ocm.software/open-component-model/bindings/go/dag"
 	dagsync "ocm.software/open-component-model/bindings/go/dag/sync"
 	descruntime "ocm.software/open-component-model/bindings/go/descriptor/runtime"
@@ -174,7 +174,7 @@ func fillGraphDefinitionWithPrefetchedComponents(
 		component := val.Descriptor.Component.Name
 		version := val.Descriptor.Component.Version
 
-		baseID := identityToTransformationID(runtime.Identity{
+		baseID := graphinternal.IdentityToTransformationID("transform", runtime.Identity{
 			descruntime.IdentityAttributeName:    component,
 			descruntime.IdentityAttributeVersion: version,
 		})
@@ -184,7 +184,7 @@ func fillGraphDefinitionWithPrefetchedComponents(
 			return fmt.Errorf("cannot convert to v2: %w", err)
 		}
 
-		descMap, err := descriptorToMap(v2desc)
+		descMap, err := graphinternal.DescriptorToMap(v2desc)
 		if err != nil {
 			return err
 		}
@@ -295,14 +295,14 @@ func processResource(resource descriptorv2.Resource, access runtime.Typed, id st
 // addUploadTransformation creates the final upload (AddComponentVersion) transformation
 // for a component, reconstructing the descriptor with CEL references to modified resources.
 func addUploadTransformation(descMap map[string]any, id string, toSpec runtime.Typed, tgd *transformv1alpha1.TransformationGraphDefinition, resourceTransformIDs map[int]string) error {
-	descriptorSpec := buildInlineDescriptorSpec(descMap, resourceTransformIDs)
+	descriptorSpec := graphinternal.BuildInlineDescriptorSpec(descMap, resourceTransformIDs, nil, nil)
 
-	addType, err := chooseAddType(toSpec)
+	addType, err := graphinternal.ChooseAddType(toSpec)
 	if err != nil {
 		return fmt.Errorf("choosing add type for target repository: %w", err)
 	}
 
-	toRepo, err := asUnstructured(toSpec)
+	toRepo, err := graphinternal.AsUnstructured(toSpec)
 	if err != nil {
 		return fmt.Errorf("cannot convert target spec to unstructured: %w", err)
 	}
@@ -320,37 +320,4 @@ func addUploadTransformation(descMap map[string]any, id string, toSpec runtime.T
 
 	tgd.Transformations = append(tgd.Transformations, upload)
 	return nil
-}
-
-// descriptorToMap marshals a v2 descriptor to map[string]any.
-func descriptorToMap(v2desc *descriptorv2.Descriptor) (map[string]any, error) {
-	rawV2Desc, err := json.Marshal(v2desc)
-	if err != nil {
-		return nil, fmt.Errorf("cannot marshal v2 descriptor: %w", err)
-	}
-	mapDesc := make(map[string]any)
-	if err := json.Unmarshal(rawV2Desc, &mapDesc); err != nil {
-		return nil, fmt.Errorf("cannot unmarshal v2 descriptor: %w", err)
-	}
-	return mapDesc, nil
-}
-
-// buildInlineDescriptorSpec returns the descriptor map with modified resources replaced
-// by CEL references to their Add transformation outputs.
-func buildInlineDescriptorSpec(descMap map[string]any, resourceTransformIDs map[int]string) map[string]any {
-	if len(resourceTransformIDs) == 0 {
-		return descMap
-	}
-
-	// Deep-copy the map so we don't mutate the caller's data.
-	raw, _ := json.Marshal(descMap)
-	result := make(map[string]any)
-	_ = json.Unmarshal(raw, &result)
-
-	component, _ := result["component"].(map[string]any)
-	resources, _ := component["resources"].([]any)
-	for i, addID := range resourceTransformIDs {
-		resources[i] = fmt.Sprintf("${%s.output.resource}", addID)
-	}
-	return result
 }

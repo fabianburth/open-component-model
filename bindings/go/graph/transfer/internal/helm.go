@@ -5,6 +5,7 @@ import (
 
 	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	helmv1alpha1 "ocm.software/open-component-model/bindings/go/helm/transformation/spec/v1alpha1"
+	graphinternal "ocm.software/open-component-model/bindings/go/graph/internal"
 	"ocm.software/open-component-model/bindings/go/runtime"
 	transformv1alpha1 "ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1/meta"
@@ -12,7 +13,7 @@ import (
 
 func processHelm(resource v2.Resource, id string, val *discoveryValue, tgd *transformv1alpha1.TransformationGraphDefinition, toSpec runtime.Typed, resourceTransformIDs map[int]string, i int, uploadAsOCIArtifact bool) error {
 	resourceIdentity := resource.ToIdentity()
-	resourceID := identityToTransformationID(resourceIdentity)
+	resourceID := graphinternal.IdentityToTransformationID("transform", resourceIdentity)
 	getResourceID := fmt.Sprintf("%sGet%s", id, resourceID)
 	convertResourceID := fmt.Sprintf("%sConvert%s", id, resourceID)
 	addResourceID := fmt.Sprintf("%sAdd%s", id, resourceID)

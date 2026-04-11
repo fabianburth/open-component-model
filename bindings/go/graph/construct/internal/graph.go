@@ -7,13 +7,13 @@ import (
 	"log/slog"
 	"os"
 
+	graphinternal "ocm.software/open-component-model/bindings/go/graph/internal"
 	"ocm.software/open-component-model/bindings/go/blob"
 	constructor "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	signingv1alpha1 "ocm.software/open-component-model/bindings/go/signing/transformation/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/dag"
 	syncdag "ocm.software/open-component-model/bindings/go/dag/sync"
 	descruntime "ocm.software/open-component-model/bindings/go/descriptor/runtime"
-	descriptorv2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	"ocm.software/open-component-model/bindings/go/repository/component/resolvers"
 	"ocm.software/open-component-model/bindings/go/runtime"
 	transformv1alpha1 "ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1"
@@ -120,7 +120,7 @@ func fillGraphDefinition(
 				continue
 			}
 			for _, ref := range val.ConstructorComponent.References {
-				refCompID := identityToTransformationID(ref.ToComponentIdentity())
+				refCompID := graphinternal.IdentityToTransformationID("construct", ref.ToComponentIdentity())
 				referencedComponents[refCompID] = struct{}{}
 				if ref.Digest == nil {
 					continue
@@ -163,7 +163,7 @@ func processConstructorComponent(
 	expectedDigests map[string]*constructor.Digest,
 	referencedComponents map[string]struct{},
 ) error {
-	baseID := identityToTransformationID(component.ToIdentity())
+	baseID := graphinternal.IdentityToTransformationID("construct", component.ToIdentity())
 
 	slog.DebugContext(ctx, "processing constructor component",
 		"component", component.Name, "version", component.Version,
@@ -205,12 +205,12 @@ func processConstructorComponent(
 		return fmt.Errorf("cannot convert constructor component to v2 descriptor: %w", err)
 	}
 
-	descMap, err := descriptorToMap(v2desc)
+	descMap, err := graphinternal.DescriptorToMap(v2desc)
 	if err != nil {
 		return err
 	}
 
-	toRepo, err := asUnstructured(targetRepoSpec)
+	toRepo, err := graphinternal.AsUnstructured(targetRepoSpec)
 	if err != nil {
 		return fmt.Errorf("cannot convert target repo spec to unstructured: %w", err)
 	}
@@ -247,7 +247,7 @@ func processConstructorComponent(
 	referenceDigestIDs := make(map[int]string)
 	if !skipDigestProcessing {
 		for i, ref := range component.References {
-			refCompID := identityToTransformationID(ref.ToComponentIdentity())
+			refCompID := graphinternal.IdentityToTransformationID("construct", ref.ToComponentIdentity())
 			digestID := refCompID + "Digest"
 			referenceDigestIDs[i] = digestID
 		}
@@ -280,14 +280,14 @@ func processExternalComponent(
 	expectedDigests map[string]*constructor.Digest,
 	referencedComponents map[string]struct{},
 ) error {
-	baseID := identityToTransformationID(extComp.Descriptor.Component.ToIdentity())
+	baseID := graphinternal.IdentityToTransformationID("construct", extComp.Descriptor.Component.ToIdentity())
 
 	v2desc, err := descruntime.ConvertToV2(runtime.NewScheme(runtime.WithAllowUnknown()), extComp.Descriptor)
 	if err != nil {
 		return fmt.Errorf("cannot convert external descriptor to v2: %w", err)
 	}
 
-	descMap, err := descriptorToMap(v2desc)
+	descMap, err := graphinternal.DescriptorToMap(v2desc)
 	if err != nil {
 		return err
 	}
@@ -298,7 +298,7 @@ func processExternalComponent(
 			"version", extComp.Descriptor.Component.Version,
 			"localResources", len(extComp.Local))
 
-		toRepo, err := asUnstructured(targetRepoSpec)
+		toRepo, err := graphinternal.AsUnstructured(targetRepoSpec)
 		if err != nil {
 			return fmt.Errorf("cannot convert target repo to unstructured: %w", err)
 		}
@@ -310,10 +310,10 @@ func processExternalComponent(
 		resourceTransformIDs := make(map[int]string)
 		for _, local := range extComp.Local {
 			resourceIdentity := local.Resource.ToIdentity()
-			resourceID := identityToTransformationID(resourceIdentity)
+			resourceID := graphinternal.IdentityToTransformationID("construct", resourceIdentity)
 			addResourceID := fmt.Sprintf("%sAdd%s", baseID, resourceID)
 
-			addLocalResourceType, err := chooseAddLocalResourceType(targetRepoSpec)
+			addLocalResourceType, err := graphinternal.ChooseAddLocalResourceType(targetRepoSpec)
 			if err != nil {
 				return fmt.Errorf("choosing add local resource type: %w", err)
 			}
@@ -417,9 +417,9 @@ func addUploadTransformation(
 	sourceTransformIDs map[int]string,
 	referenceDigestIDs map[int]string,
 ) error {
-	descriptorSpec := buildInlineDescriptorSpec(descMap, resourceTransformIDs, sourceTransformIDs, referenceDigestIDs)
+	descriptorSpec := graphinternal.BuildInlineDescriptorSpec(descMap, resourceTransformIDs, sourceTransformIDs, referenceDigestIDs)
 
-	addType, err := chooseAddType(targetRepoSpec)
+	addType, err := graphinternal.ChooseAddType(targetRepoSpec)
 	if err != nil {
 		return fmt.Errorf("choosing add type for target repository: %w", err)
 	}
@@ -452,9 +452,9 @@ func addConstructorUploadTransformation(
 	sourceTransformIDs map[int]string,
 	referenceDigestIDs map[int]string,
 ) error {
-	descriptorSpec := buildInlineDescriptorSpec(descMap, resourceTransformIDs, sourceTransformIDs, referenceDigestIDs)
+	descriptorSpec := graphinternal.BuildInlineDescriptorSpec(descMap, resourceTransformIDs, sourceTransformIDs, referenceDigestIDs)
 
-	addType, err := chooseAddType(targetRepoSpec)
+	addType, err := graphinternal.ChooseAddType(targetRepoSpec)
 	if err != nil {
 		return fmt.Errorf("choosing add type for target repository: %w", err)
 	}
@@ -472,56 +472,6 @@ func addConstructorUploadTransformation(
 
 	tgd.Transformations = append(tgd.Transformations, upload)
 	return nil
-}
-
-// descriptorToMap marshals a v2 descriptor to map[string]any.
-func descriptorToMap(v2desc *descriptorv2.Descriptor) (map[string]any, error) {
-	rawV2Desc, err := json.Marshal(v2desc)
-	if err != nil {
-		return nil, fmt.Errorf("cannot marshal v2 descriptor: %w", err)
-	}
-	mapDesc := make(map[string]any)
-	if err := json.Unmarshal(rawV2Desc, &mapDesc); err != nil {
-		return nil, fmt.Errorf("cannot unmarshal v2 descriptor: %w", err)
-	}
-	return mapDesc, nil
-}
-
-// buildInlineDescriptorSpec returns a deep copy of the descriptor map with modified
-// resources, sources, and references replaced by CEL references to transformation outputs.
-func buildInlineDescriptorSpec(descMap map[string]any, resourceTransformIDs map[int]string, sourceTransformIDs map[int]string, referenceDigestIDs map[int]string) map[string]any {
-	if len(resourceTransformIDs) == 0 && len(sourceTransformIDs) == 0 && len(referenceDigestIDs) == 0 {
-		return descMap
-	}
-
-	// Deep-copy the map so we don't mutate the caller's data.
-	raw, _ := json.Marshal(descMap)
-	result := make(map[string]any)
-	_ = json.Unmarshal(raw, &result)
-
-	component, _ := result["component"].(map[string]any)
-
-	if resources, ok := component["resources"].([]any); ok {
-		for i, addID := range resourceTransformIDs {
-			resources[i] = fmt.Sprintf("${%s.output.resource}", addID)
-		}
-	}
-
-	if sources, ok := component["sources"].([]any); ok {
-		for i, addID := range sourceTransformIDs {
-			sources[i] = fmt.Sprintf("${%s.output.source}", addID)
-		}
-	}
-
-	if refs, ok := component["componentReferences"].([]any); ok {
-		for i, digestID := range referenceDigestIDs {
-			if refMap, ok := refs[i].(map[string]any); ok {
-				refMap["digest"] = fmt.Sprintf("${%s.output.digest}", digestID)
-			}
-		}
-	}
-
-	return result
 }
 
 // resourceToMap converts a descriptor Resource to map[string]any for embedding in unstructured specs.

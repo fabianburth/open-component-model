@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	graphinternal "ocm.software/open-component-model/bindings/go/graph/internal"
 	ociv1 "ocm.software/open-component-model/bindings/go/oci/spec/access/v1"
 	ctfv1 "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/ctf"
 	"ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/oci"
@@ -19,7 +20,7 @@ func TestConvertToConcreteRepo_OCIPassthrough(t *testing.T) {
 		Type:    runtime.Type{Name: oci.Type, Version: "v1"},
 		BaseUrl: "ghcr.io",
 	}
-	result, err := convertToConcreteRepo(repo)
+	result, err := graphinternal.ConvertToConcreteRepo(repo)
 	require.NoError(t, err)
 	assert.Equal(t, repo, result)
 }
@@ -29,14 +30,14 @@ func TestConvertToConcreteRepo_CTFPassthrough(t *testing.T) {
 		Type:     runtime.Type{Name: ctfv1.Type, Version: ctfv1.Version},
 		FilePath: "/tmp/archive",
 	}
-	result, err := convertToConcreteRepo(repo)
+	result, err := graphinternal.ConvertToConcreteRepo(repo)
 	require.NoError(t, err)
 	assert.Equal(t, repo, result)
 }
 
 func TestConvertToConcreteRepo_UnknownType(t *testing.T) {
 	unknown := &runtime.Unstructured{Data: map[string]any{"type": "unknown"}}
-	_, err := convertToConcreteRepo(unknown)
+	_, err := graphinternal.ConvertToConcreteRepo(unknown)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown repository type")
 }

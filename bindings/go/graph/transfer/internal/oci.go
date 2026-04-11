@@ -9,6 +9,7 @@ import (
 	ociv1 "ocm.software/open-component-model/bindings/go/oci/spec/access/v1"
 	ocirepo "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/oci"
 	ociv1alpha1 "ocm.software/open-component-model/bindings/go/oci/transformation/spec/v1alpha1"
+	graphinternal "ocm.software/open-component-model/bindings/go/graph/internal"
 	"ocm.software/open-component-model/bindings/go/runtime"
 	transformv1alpha1 "ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1/meta"
@@ -19,7 +20,7 @@ func processOCIArtifact(resource descriptorv2.Resource, id string, val *discover
 	version := val.Descriptor.Component.Version
 
 	resourceIdentity := resource.ToIdentity()
-	resourceID := identityToTransformationID(resourceIdentity)
+	resourceID := graphinternal.IdentityToTransformationID("transform", resourceIdentity)
 	getResourceID := fmt.Sprintf("%sGet%s", id, resourceID)
 	addResourceID := fmt.Sprintf("%sAdd%s", id, resourceID)
 
@@ -75,12 +76,12 @@ func processOCIArtifact(resource descriptorv2.Resource, id string, val *discover
 // ociUploadAsLocalResource creates an AddLocalResource transformation that uploads the OCI artifact as a local resource to the target repository.
 // It uses the output of the GetOCIArtifact transformation to populate the fields of the AddLocalResource transformation, ensuring that the same resource is referenced and uploaded.
 func ociUploadAsLocalResource(toSpec runtime.Typed, component, version, addResourceID, getResourceID string, referenceName referenceNameOption) (transformv1alpha1.GenericTransformation, error) {
-	addLocalResourceType, err := chooseAddLocalResourceType(toSpec)
+	addLocalResourceType, err := graphinternal.ChooseAddLocalResourceType(toSpec)
 	if err != nil {
 		return transformv1alpha1.GenericTransformation{}, fmt.Errorf("choosing add local resource type for target repository: %w", err)
 	}
 
-	toRepo, err := asUnstructured(toSpec)
+	toRepo, err := graphinternal.AsUnstructured(toSpec)
 	if err != nil {
 		return transformv1alpha1.GenericTransformation{}, fmt.Errorf("cannot convert target spec to unstructured: %w", err)
 	}

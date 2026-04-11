@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"slices"
-	"sort"
 	"strings"
 	"sync"
 
@@ -226,37 +224,4 @@ func (d *discoverer) Discover(ctx context.Context, parent *discoveryValue) ([]st
 		children = append(children, key)
 	}
 	return children, nil
-}
-
-var toWordRunes = []rune{',', '.', '/', '-'}
-
-// identityToTransformationID converts a component identity (name + version) to a camelCase
-// transformation ID suitable for use as a DAG vertex key. The identity map keys are sorted
-// alphabetically for determinism, and separator characters (dots, slashes, dashes, commas)
-// are treated as word boundaries for camelCase conversion.
-//
-// Example: {"name": "ocm.software/my-app", "version": "1.0.0"} → "transformOcmSoftwareMyApp100"
-func identityToTransformationID(id runtime.Identity) string {
-	// TODO(jakobmoellerdev): decide if we really wanna keep such strict limits on transformation ids,
-	//   if we really dont need them to be that strict.
-	//   Currently Im forced to convert a map to a camel case string here.
-	words := []string{"transform"}
-	keys := make([]string, 0, len(id))
-	for k := range id {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		words = append(words, strings.FieldsFunc(id[k], func(r rune) bool {
-			return slices.Contains(toWordRunes, r)
-		})...)
-	}
-	result := strings.ToLower(words[0])
-	for i := 1; i < len(words); i++ {
-		w := strings.ToLower(words[i])
-		if len(w) > 0 {
-			result += strings.ToUpper(w[:1]) + w[1:]
-		}
-	}
-	return result
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	descriptor "ocm.software/open-component-model/bindings/go/descriptor/runtime"
+	graphinternal "ocm.software/open-component-model/bindings/go/graph/internal"
 	"ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/oci"
 	"ocm.software/open-component-model/bindings/go/repository"
 	"ocm.software/open-component-model/bindings/go/repository/component/resolvers"
@@ -112,7 +113,7 @@ func TestIdentityToTransformationID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := identityToTransformationID(tt.identity)
+			got := graphinternal.IdentityToTransformationID("transform", tt.identity)
 			assert.Equal(t, tt.want, got)
 		})
 	}

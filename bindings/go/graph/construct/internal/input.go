@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 
+	graphinternal "ocm.software/open-component-model/bindings/go/graph/internal"
 	constructor "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	ociv1alpha1 "ocm.software/open-component-model/bindings/go/oci/transformation/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/runtime"
@@ -36,7 +37,7 @@ func processResourceTransformations(
 	skipDigestProcessing bool,
 ) (string, error) {
 	resourceIdentity := resource.ToIdentity()
-	resourceID := identityToTransformationID(resourceIdentity)
+	resourceID := graphinternal.IdentityToTransformationID("construct", resourceIdentity)
 	inputID := fmt.Sprintf("%sInput%s", baseID, resourceID)
 	addResourceID := fmt.Sprintf("%sAdd%s", baseID, resourceID)
 
@@ -89,7 +90,7 @@ func processResourceTransformations(
 		}
 		tgd.Transformations = append(tgd.Transformations, inputTransform)
 
-		addLocalResourceType, err := chooseAddLocalResourceType(targetRepoSpec)
+		addLocalResourceType, err := graphinternal.ChooseAddLocalResourceType(targetRepoSpec)
 		if err != nil {
 			return "", fmt.Errorf("choosing add local resource type: %w", err)
 		}

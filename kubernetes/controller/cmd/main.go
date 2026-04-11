@@ -33,7 +33,7 @@ import (
 	ocires "ocm.software/open-component-model/bindings/go/oci/repository/resource"
 	v1 "ocm.software/open-component-model/bindings/go/oci/spec/credentials/identity/v1"
 	ocirepository "ocm.software/open-component-model/bindings/go/oci/spec/repository"
-	"ocm.software/open-component-model/bindings/go/oci/transformer"
+	"ocm.software/open-component-model/bindings/go/oci/transformation"
 	"ocm.software/open-component-model/bindings/go/plugin/manager"
 	"ocm.software/open-component-model/bindings/go/rsa/signing/handler"
 	signingv1alpha1 "ocm.software/open-component-model/bindings/go/rsa/signing/v1alpha1"

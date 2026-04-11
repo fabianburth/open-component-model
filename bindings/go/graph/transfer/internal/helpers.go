@@ -6,87 +6,27 @@ import (
 
 	ocispecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 
+	graphinternal "ocm.software/open-component-model/bindings/go/graph/internal"
 	"ocm.software/open-component-model/bindings/go/oci/looseref"
 	ctfv1 "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/ctf"
 	"ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/oci"
-	ociv1alpha1 "ocm.software/open-component-model/bindings/go/oci/transformation/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 
 func asUnstructured(typed runtime.Typed) (*runtime.Unstructured, error) {
-	var raw runtime.Raw
-	if err := runtime.NewScheme(runtime.WithAllowUnknown()).Convert(typed, &raw); err != nil {
-		return nil, fmt.Errorf("cannot convert to raw: %w", err)
-	}
-	var unstructured runtime.Unstructured
-	if err := runtime.NewScheme(runtime.WithAllowUnknown()).Convert(&raw, &unstructured); err != nil {
-		return nil, fmt.Errorf("cannot convert to unstructured: %w", err)
-	}
-	return &unstructured, nil
-}
-
-// convertToConcreteRepo converts a runtime.Typed (which may be *runtime.Raw) to a concrete repository type.
-func convertToConcreteRepo(repo runtime.Typed) (runtime.Typed, error) {
-	switch r := repo.(type) {
-	case *oci.Repository, *ctfv1.Repository:
-		return repo, nil
-	case *runtime.Raw:
-		obj, err := scheme.NewObject(r.Type)
-		if err != nil {
-			return nil, fmt.Errorf("cannot create object for type %s: %w", r.Type, err)
-		}
-		if err := scheme.Convert(r, obj); err != nil {
-			return nil, fmt.Errorf("cannot convert raw to concrete type: %w", err)
-		}
-		return obj, nil
-	default:
-		return nil, fmt.Errorf("unknown repository type %T", repo)
-	}
+	return graphinternal.AsUnstructured(typed)
 }
 
 func chooseAddType(repo runtime.Typed) (runtime.Type, error) {
-	concreteRepo, err := convertToConcreteRepo(repo)
-	if err != nil {
-		return runtime.Type{}, fmt.Errorf("converting repository spec: %w", err)
-	}
-	switch concreteRepo.(type) {
-	case *oci.Repository:
-		return ociv1alpha1.OCIAddComponentVersionV1alpha1, nil
-	case *ctfv1.Repository:
-		return ociv1alpha1.CTFAddComponentVersionV1alpha1, nil
-	default:
-		return runtime.Type{}, fmt.Errorf("unsupported repository type %T for add operation", concreteRepo)
-	}
+	return graphinternal.ChooseAddType(repo)
 }
 
 func chooseGetLocalResourceType(repo runtime.Typed) (runtime.Type, error) {
-	concreteRepo, err := convertToConcreteRepo(repo)
-	if err != nil {
-		return runtime.Type{}, fmt.Errorf("converting repository spec: %w", err)
-	}
-	switch concreteRepo.(type) {
-	case *oci.Repository:
-		return ociv1alpha1.OCIGetLocalResourceV1alpha1, nil
-	case *ctfv1.Repository:
-		return ociv1alpha1.CTFGetLocalResourceV1alpha1, nil
-	default:
-		return runtime.Type{}, fmt.Errorf("unsupported repository type %T for get local resource operation", concreteRepo)
-	}
+	return graphinternal.ChooseGetLocalResourceType(repo)
 }
 
 func chooseAddLocalResourceType(repo runtime.Typed) (runtime.Type, error) {
-	concreteRepo, err := convertToConcreteRepo(repo)
-	if err != nil {
-		return runtime.Type{}, fmt.Errorf("converting repository spec: %w", err)
-	}
-	switch concreteRepo.(type) {
-	case *oci.Repository:
-		return ociv1alpha1.OCIAddLocalResourceV1alpha1, nil
-	case *ctfv1.Repository:
-		return ociv1alpha1.CTFAddLocalResourceV1alpha1, nil
-	default:
-		return runtime.Type{}, fmt.Errorf("unsupported repository type %T for add local resource operation", concreteRepo)
-	}
+	return graphinternal.ChooseAddLocalResourceType(repo)
 }
 
 func getReferenceName(imageReference string) (string, error) {
@@ -133,16 +73,9 @@ func RepositoryEqual(a, b runtime.Typed) bool {
 	}
 }
 
-// IsOCICompliantManifest checks if a descriptor describes a manifest that is recognizable by OCI.
-// TODO(fabianburth): this is currently directly copied from
-//
-//	bindings/go/oci/internal/introspection/manifest.go. We accept this for now
-//	as we want to rework transfer behaviour towards a config based mechanism
-//	soon anyways after which we might not need this function here anymore.
+// isOCICompliantManifest checks if a descriptor describes a manifest that is recognizable by OCI.
 func isOCICompliantManifest(mediaType string) bool {
 	switch mediaType {
-	// TODO(jakobmoellerdev): currently only Image Indexes and OCI manifests are supported,
-	//  but we may want to extend this down the line with additional media types such as docker manifests.
 	case ocispecv1.MediaTypeImageManifest,
 		ocispecv1.MediaTypeImageIndex:
 		return true

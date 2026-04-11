@@ -7,6 +7,7 @@ import (
 	ociv1 "ocm.software/open-component-model/bindings/go/oci/spec/access/v1"
 	ocirepo "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/oci"
 	ociv1alpha1 "ocm.software/open-component-model/bindings/go/oci/transformation/spec/v1alpha1"
+	graphinternal "ocm.software/open-component-model/bindings/go/graph/internal"
 	"ocm.software/open-component-model/bindings/go/runtime"
 	transformv1alpha1 "ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1/meta"
@@ -19,7 +20,7 @@ func processLocalBlob(resource descriptorv2.Resource, _ *descriptorv2.LocalBlob,
 
 	// Generate transformation IDs
 	resourceIdentity := resource.ToIdentity()
-	resourceID := identityToTransformationID(resourceIdentity)
+	resourceID := graphinternal.IdentityToTransformationID("transform", resourceIdentity)
 	getResourceID := fmt.Sprintf("%sGet%s", id, resourceID)
 	addResourceID := fmt.Sprintf("%sAdd%s", id, resourceID)
 
@@ -29,12 +30,12 @@ func processLocalBlob(resource descriptorv2.Resource, _ *descriptorv2.LocalBlob,
 		resourceIdentityMap[k] = v
 	}
 
-	getLocalResourceType, err := chooseGetLocalResourceType(sourceRepo)
+	getLocalResourceType, err := graphinternal.ChooseGetLocalResourceType(sourceRepo)
 	if err != nil {
 		return fmt.Errorf("choosing get local resource type for source repository: %w", err)
 	}
 
-	sourceRepoUnstructured, err := asUnstructured(sourceRepo)
+	sourceRepoUnstructured, err := graphinternal.AsUnstructured(sourceRepo)
 	if err != nil {
 		return fmt.Errorf("cannot convert source repository spec to unstructured: %w", err)
 	}
@@ -54,14 +55,14 @@ func processLocalBlob(resource descriptorv2.Resource, _ *descriptorv2.LocalBlob,
 	}
 	tgd.Transformations = append(tgd.Transformations, getResourceTransform)
 
-	toRepo, err := asUnstructured(toSpec)
+	toRepo, err := graphinternal.AsUnstructured(toSpec)
 	if err != nil {
 		return fmt.Errorf("cannot convert target spec to unstructured: %w", err)
 	}
 
 	var addResourceTransform transformv1alpha1.GenericTransformation
 	if !uploadAsOCIArtifact {
-		addLocalResourceType, err := chooseAddLocalResourceType(toSpec)
+		addLocalResourceType, err := graphinternal.ChooseAddLocalResourceType(toSpec)
 		if err != nil {
 			return fmt.Errorf("choosing add local resource type for target repository: %w", err)
 		}

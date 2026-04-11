@@ -3,6 +3,7 @@ package internal
 import (
 	"fmt"
 
+	graphinternal "ocm.software/open-component-model/bindings/go/graph/internal"
 	constructor "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	"ocm.software/open-component-model/bindings/go/runtime"
 	transformv1alpha1 "ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1"
@@ -27,7 +28,7 @@ func processSourceTransformations(
 	}
 
 	sourceIdentity := source.ToIdentity()
-	sourceID := identityToTransformationID(sourceIdentity)
+	sourceID := graphinternal.IdentityToTransformationID("construct", sourceIdentity)
 	inputID := fmt.Sprintf("%sInputSrc%s", baseID, sourceID)
 	addSourceID := fmt.Sprintf("%sAddSrc%s", baseID, sourceID)
 
@@ -77,7 +78,7 @@ func processSourceTransformations(
 	}
 	tgd.Transformations = append(tgd.Transformations, inputTransform)
 
-	addLocalSourceType, err := chooseAddLocalSourceType(targetRepoSpec)
+	addLocalSourceType, err := graphinternal.ChooseAddLocalSourceType(targetRepoSpec)
 	if err != nil {
 		return "", fmt.Errorf("choosing add local source type: %w", err)
 	}

@@ -377,19 +377,14 @@ The indirection caused the v1/v2 format divergence (M-1), forced three `buildDes
 
 ---
 
-### Strategy 2: Shared Graph Utilities Package
+### Strategy 2: Shared Graph Utilities
 
 **Goal:** Eliminate remaining code duplication (C-2, C-3, C-4).
 
-**Proposed location:** `bindings/go/transform/internal/graphutil`
-
-**Contents:**
-1. `IdentityToTransformationID(prefix string, id runtime.Identity) string`
-2. `AsUnstructured(typed runtime.Typed) (*runtime.Unstructured, error)`
-3. `ConvertToConcreteRepo(repo runtime.Typed, scheme *runtime.Scheme) (runtime.Typed, error)`
-4. `ChooseAddType`, `ChooseGetLocalResourceType`, `ChooseAddLocalResourceType` using `ConvertToConcreteRepo`
-
-**Note:** `AddDescriptorToEnvironment` is no longer needed (deleted by Strategy 1).
+**Placement:** Split by semantic fit across existing modules that both `construct/` and `transfer/` already depend on:
+- `IdentityToTransformationID(prefix, id)` → `bindings/go/transform/` (graph-ID concern, both depend on `transform/`)
+- `AsUnstructured(typed)` → `bindings/go/runtime/` (pure `runtime.Typed` → `runtime.Unstructured` conversion)
+- `ConvertToConcreteRepo`, `ChooseAddType`, `ChooseGetLocalResourceType`, `ChooseAddLocalResourceType` → `bindings/go/oci/` (OCI/CTF type selection, both depend on `oci/`)
 
 **Impact:** Resolves C-2, C-3, C-4 in one PR.
 
@@ -403,34 +398,46 @@ The indirection caused the v1/v2 format divergence (M-1), forced three `buildDes
 
 ---
 
-### Strategy 4: Restructure Constructor Modules to Mirror Descriptor
+### Strategy 4: Restructure Constructor Modules to Mirror Descriptor + Extract `construct` Module
 
-**Goal:** Address A-2 — make the constructor directory structurally equivalent to the descriptor directory, enabling lightweight imports and clean dependency separation.
+**Goal:** Address A-2 — make the `constructor/` directory a pure domain model (mirroring `descriptor/`), and move graph orchestration to a new `construct/` module at the same level as `transfer/`.
 
 **Target layout:**
 
 ```
-constructor/
-├── v2/             (module)  ← serialization format (renamed from spec/v1)
-├── runtime/        (module)  ← runtime types + library interfaces
-├── spec/
-│   └── transformation/       ← transformation spec types (ComputeComponentDigest)
-├── transformer/              ← transformation implementations
-├── internal/graph/           ← graph generation logic
-└── go.mod                    ← orchestration module (BuildGraphDefinition, NewDefaultBuilder)
+bindings/go/
+├── constructor/                ← domain model only (mirrors descriptor/)
+│   ├── v2/        (module)     ← serialization format (renamed from spec/v1)
+│   └── runtime/   (module)     ← runtime types + library interfaces
+├── construct/     (module)     ← graph generation for building component versions
+│   ├── internal/graph/         ← graph building (from constructor/internal/graph/)
+│   ├── spec/transformation/    ← ComputeComponentDigest spec (from constructor/spec/transformation/)
+│   └── transformer/            ← ComputeComponentDigest impl (from constructor/transformer/)
+├── transfer/      (module)     ← graph generation for transferring component versions
+├── transform/     (module)     ← shared graph engine (CEL, DAG, builder)
+├── repository/    (module)     ← access-type library abstractions
+├── oci/           (module)     ← OCI implementation + transformers
+├── ...
 ```
 
 Mirrors:
 ```
-descriptor/
-├── v2/             (module)  ← serialization format
-├── runtime/        (module)  ← runtime types + conversions
-├── normalisation/  (module)  ← digest normalization
+descriptor/                     constructor/              (after restructure)
+├── v2/          (module)       ├── v2/        (module)   ← serialization format
+├── runtime/     (module)       └── runtime/   (module)   ← runtime types + interfaces
+├── normalisation/ (module)
+```
+
+`construct/` and `transfer/` become symmetric peers — same abstraction level, same dependency pattern, both producing `TransformationGraphDefinition`:
+
+```
+construct/  ──→ constructor/runtime, constructor/v2, transform/, oci/, repository/
+transfer/   ──→ descriptor/runtime,  descriptor/v2,  transform/, oci/, repository/, helm/
 ```
 
 **Changes:**
 
-1. **Rename `constructor/spec/v1` → `constructor/v2`** (new module path: `ocm.software/.../constructor/v2`). The constructor format is based on the v2 descriptor schema; calling it `v2` aligns naming with `descriptor/v2`. The `v2` is the schema version, not the spec version. The existing `constructor/spec/v1` module continues to exist as an alias/redirect during transition.
+1. **Rename `constructor/spec/v1` → `constructor/v2`** (new module path: `ocm.software/.../constructor/v2`). The constructor format is based on the v2 descriptor schema; calling it `v2` aligns naming with `descriptor/v2`. The existing `constructor/spec/v1` module continues to exist as an alias/redirect during transition.
 
 2. **Extract `constructor/runtime` into its own module** (new module path: `ocm.software/.../constructor/runtime`). Contains:
    - Runtime types: `Component`, `Resource`, `Source`, `AccessOrInput`, `Reference`, `Digest`, `Label`, `CopyPolicy`, etc. (currently in `constructor/runtime/constructor.go`)
@@ -438,9 +445,17 @@ descriptor/
    - Library interfaces: `ResourceInputMethod`, `SourceInputMethod`, result types, `ResourceConsumerIdentityProvider`, `SourceConsumerIdentityProvider`, `ExternalComponentRepositoryProvider` (currently in `constructor/interface.go`)
    - Dependencies: `runtime`, `blob`, `descriptor/runtime`, `constructor/v2`, `repository` — all lightweight
 
-3. **Drop `ResourceDigestProcessor` from `constructor/interface.go`.** Use `repository.ResourceDigestProcessor` everywhere (same interface, already used by the actual transformers).
+3. **Create `bindings/go/construct/` module** (new module path: `ocm.software/.../construct`). Receives the graph orchestration code from the constructor root:
+   - `BuildGraphDefinition` + options (from `constructor/constructor.go`, `constructor/options.go`)
+   - `NewDefaultBuilder` (from `constructor/builder.go`)
+   - `internal/graph/` (from `constructor/internal/graph/`)
+   - `spec/transformation/v1alpha1/` — `ComputeComponentDigest` spec (from `constructor/spec/transformation/`)
+   - `transformer/` — `ComputeComponentDigest` implementation (from `constructor/transformer/`)
+   - Dependencies: `constructor/runtime`, `constructor/v2`, `transform/`, `oci/`, `repository/`, `dag/`, `credentials/`, input packages
 
-4. **Constructor root module slims down** to orchestration only: `BuildGraphDefinition`, `NewDefaultBuilder`, options, and the `internal/graph/` package. It imports `constructor/runtime` and `constructor/v2` like any other consumer.
+4. **Drop `ResourceDigestProcessor` from `constructor/interface.go`.** Use `repository.ResourceDigestProcessor` everywhere (same interface, already used by the actual transformers).
+
+5. **Delete the old `constructor` root module** (`constructor/go.mod`). All its content has moved to either `constructor/runtime` (types + interfaces) or `construct/` (orchestration). The `constructor/` directory retains only the `v2/` and `runtime/` sub-modules.
 
 **Dependency impact:**
 
@@ -449,7 +464,9 @@ descriptor/
 | `input/file`, `input/dir`, `input/utf8` | → full `constructor` module | → `constructor/runtime` (lightweight) |
 | `helm/input` | → full `constructor` module | → `constructor/runtime` (lightweight) |
 | `plugin/manager` | → full `constructor` module | → `constructor/runtime` (lightweight) |
-| `cli` | → full `constructor` module | → `constructor` (orchestration, unchanged) |
+| `cli` (`add component-version`) | → `constructor` module | → `construct/` module |
+| `construct/` (new) | — | → `constructor/runtime`, `constructor/v2`, `transform/`, `oci/` |
+| `transfer/` | unchanged | unchanged |
 
 ---
 
@@ -460,9 +477,9 @@ descriptor/
 **Prerequisite:** Strategy 4 (constructor module restructuring) — the `InputMethod` implementations need to import `ResourceInputMethod` / `SourceInputMethod` from the lightweight `constructor/runtime` module, not the full `constructor` module.
 
 **Approach:**
-1. Restore the `InputMethod` types deleted in commit `4f2e8f910` into each input package (`input/file/method.go`, `input/dir/method.go`, `input/utf8/method.go`, `helm/input/method.go`). These implement `constructor.ResourceInputMethod` / `constructor.SourceInputMethod`.
+1. Restore the `InputMethod` types deleted in commit `4f2e8f910` into each input package (`input/file/method.go`, `input/dir/method.go`, `input/utf8/method.go`, `helm/input/method.go`). These implement `constructor/runtime.ResourceInputMethod` / `constructor/runtime.SourceInputMethod`.
 2. Refactor each transformer (`FileInput`, `DirInput`, `UTF8Input`, `HelmInput`) to instantiate the corresponding `InputMethod` and delegate to `ProcessResource()` / `ProcessSource()`, then buffer the returned blob and populate the transformation output.
-3. The `ResourceInputMethod` / `SourceInputMethod` interfaces remain in `constructor/interface.go`. The plugin input registry (`plugin/manager/registries/input/`) becomes live again.
+3. The `ResourceInputMethod` / `SourceInputMethod` interfaces live in `constructor/runtime`. The plugin input registry (`plugin/manager/registries/input/`) becomes live again.
 
 **After this change, transformers mirror the access-type pattern:**
 
@@ -515,19 +532,20 @@ func (t *FileInput) Transform(ctx context.Context, step runtime.Typed) (runtime.
 |---|-------|--------|--------|
 | 6 | A-2 | Rename `constructor/spec/v1` → `constructor/v2` per Strategy 4 | Small |
 | 7 | A-2 | Extract `constructor/runtime` into its own module with library interfaces per Strategy 4 | Medium |
-| 8 | A-2 | Drop duplicate `ResourceDigestProcessor` from `constructor/interface.go` | Small |
-| 9 | A-1 | Restore `InputMethod` types in `input/file`, `input/dir`, `input/utf8`, `helm/input` per Strategy 5 | Medium |
-| 10 | A-1 | Refactor transformers (`FileInput`, `DirInput`, `UTF8Input`, `HelmInput`) to delegate to restored `InputMethod` | Medium |
+| 8 | A-2 | Create `bindings/go/construct/` module, move graph orchestration from constructor root per Strategy 4 | Large |
+| 9 | A-2 | Drop duplicate `ResourceDigestProcessor` from constructor, delete old constructor root module | Small |
+| 10 | A-1 | Restore `InputMethod` types in `input/file`, `input/dir`, `input/utf8`, `helm/input` per Strategy 5 | Medium |
+| 11 | A-1 | Refactor transformers (`FileInput`, `DirInput`, `UTF8Input`, `HelmInput`) to delegate to restored `InputMethod` | Medium |
 
 ### Phase 4: Remaining Alignment (Medium-term)
 
 | # | Issue | Action | Effort |
 |---|-------|--------|--------|
-| 11 | M-4 | Adapt constructor's resolver to wrap `ComponentVersionRepositoryResolver` | Medium |
+| 12 | M-4 | Adapt constructor's resolver to wrap `ComponentVersionRepositoryResolver` | Medium |
 
 ### Phase 5: Feature Parity (Long-term)
 
 | # | Issue | Action | Effort |
 |---|-------|--------|--------|
-| 12 | M-3 | Digest processing in transfer (Strategy 6) | Large |
-| 13 | TODO | By-value resource processing in constructor (`input.go:119`) | Large |
+| 13 | M-3 | Digest processing in transfer (Strategy 6) | Large |
+| 14 | TODO | By-value resource processing in constructor (`input.go:119`) | Large |

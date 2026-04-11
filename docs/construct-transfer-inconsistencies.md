@@ -381,12 +381,12 @@ The indirection caused the v1/v2 format divergence (M-1), forced three `buildDes
 
 **Goal:** Eliminate remaining code duplication (C-2, C-3, C-4).
 
-**Placement:** Split by semantic fit across existing modules that both `construct/` and `transfer/` already depend on:
-- `IdentityToTransformationID(prefix, id)` → `bindings/go/transform/` (graph-ID concern, both depend on `transform/`)
+**Placement:** With Strategy 4 merging construct and transfer into `graph/`, the duplicated helpers simply become shared code within the module. For utilities that are genuinely generic:
 - `AsUnstructured(typed)` → `bindings/go/runtime/` (pure `runtime.Typed` → `runtime.Unstructured` conversion)
-- `ConvertToConcreteRepo`, `ChooseAddType`, `ChooseGetLocalResourceType`, `ChooseAddLocalResourceType` → `bindings/go/oci/` (OCI/CTF type selection, both depend on `oci/`)
+- `ConvertToConcreteRepo`, `ChooseAddType`, `ChooseGetLocalResourceType`, `ChooseAddLocalResourceType` → `bindings/go/oci/` (OCI/CTF type selection)
+- `IdentityToTransformationID(prefix, id)` → shared code in `graph/` module (internal package or root)
 
-**Impact:** Resolves C-2, C-3, C-4 in one PR.
+**Impact:** C-3, C-4 are resolved automatically by the merge. C-2 resolved by placing `ConvertToConcreteRepo` in `oci/`.
 
 ---
 
@@ -398,9 +398,17 @@ The indirection caused the v1/v2 format divergence (M-1), forced three `buildDes
 
 ---
 
-### Strategy 4: Restructure Constructor Modules to Mirror Descriptor + Extract `construct` Module
+### Strategy 4: Restructure Constructor Modules + Merge Graph Generation into `graph/`
 
-**Goal:** Address A-2 — make the `constructor/` directory a pure domain model (mirroring `descriptor/`), and move graph orchestration to a new `construct/` module at the same level as `transfer/`.
+**Goal:** Address A-2 — make `constructor/` a pure domain model (mirroring `descriptor/`), and merge construct and transfer graph generation into a single `graph/` module with `graph/construct` and `graph/transfer` subpackages.
+
+**Rationale for merging construct and transfer:**
+- Both do the same thing: produce a `TransformationGraphDefinition` from domain inputs
+- The transformers are already shared (`AddComponentVersion`, `AddLocalResource`, `GetLocalResource`, etc.)
+- Construct-only transformers (`ComputeComponentDigest`, `ProcessOCIResourceDigest`, input transformers) are exactly what transfer needs for feature parity (M-3)
+- A single `NewDefaultBuilder` registers all transformers — construct won't emit transfer-only nodes and vice versa, but when transfer needs `ComputeComponentDigest`, it's already registered
+- All duplicated helpers (C-3, C-4, C-5) disappear — one module, one copy
+- Dependency union (`signing` from transfer, `input/*` + `descriptor/normalisation` from construct) is acceptable — `graph/` is a high-level module only imported by CLI, not by any lightweight library
 
 **Target layout:**
 
@@ -409,11 +417,16 @@ bindings/go/
 ├── constructor/                ← domain model only (mirrors descriptor/)
 │   ├── v2/        (module)     ← serialization format (renamed from spec/v1)
 │   └── runtime/   (module)     ← runtime types + library interfaces
-├── construct/     (module)     ← graph generation for building component versions
-│   ├── internal/graph/         ← graph building (from constructor/internal/graph/)
-│   ├── spec/transformation/    ← ComputeComponentDigest spec (from constructor/spec/transformation/)
-│   └── transformer/            ← ComputeComponentDigest impl (from constructor/transformer/)
-├── transfer/      (module)     ← graph generation for transferring component versions
+├── graph/         (module)     ← graph generation (merged construct + transfer)
+│   ├── construct/              ← BuildGraphDefinition for component construction
+│   │   └── internal/           ← construct-specific graph building
+│   ├── transfer/               ← BuildGraphDefinition for component transfer
+│   │   └── internal/           ← transfer-specific graph building + discovery
+│   ├── builder.go              ← shared NewDefaultBuilder (all transformers)
+│   ├── helpers.go              ← shared utilities (identityToTransformationID, etc.)
+│   ├── spec/transformation/    ← ComputeComponentDigest spec
+│   └── transformer/            ← ComputeComponentDigest impl
+├── transfer/      (module)     ← DELETED (merged into graph/transfer)
 ├── transform/     (module)     ← shared graph engine (CEL, DAG, builder)
 ├── repository/    (module)     ← access-type library abstractions
 ├── oci/           (module)     ← OCI implementation + transformers
@@ -428,34 +441,47 @@ descriptor/                     constructor/              (after restructure)
 ├── normalisation/ (module)
 ```
 
-`construct/` and `transfer/` become symmetric peers — same abstraction level, same dependency pattern, both producing `TransformationGraphDefinition`:
+**Dependencies of `graph/` module:**
 
 ```
-construct/  ──→ constructor/runtime, constructor/v2, transform/, oci/, repository/
-transfer/   ──→ descriptor/runtime,  descriptor/v2,  transform/, oci/, repository/, helm/
+graph/ ──→ constructor/runtime, constructor/v2          (construct input types)
+       ──→ descriptor/runtime, descriptor/v2            (transfer input types)
+       ──→ descriptor/normalisation                     (ComputeComponentDigest)
+       ──→ transform/                                   (graph engine)
+       ──→ oci/, helm/                                  (transformers)
+       ──→ repository/, credentials/                    (library abstractions)
+       ──→ signing/                                     (digest verification during transfer discovery)
+       ──→ input/file, input/dir, input/utf8            (input transformers)
+       ──→ dag/                                         (DAG data structure)
+       ──→ blob/                                        (external component blob handling)
 ```
+
+All previous concerns about merging are resolved:
+- **Lightweight consumers unaffected:** `input/file` etc. import `constructor/runtime`, not `graph/`
+- **Dep union acceptable:** `graph/` is high-level; only CLI imports it
+- **Single builder:** One `NewDefaultBuilder` registers all transformers; construct-specific and transfer-specific nodes coexist
+- **Builder constructor args:** Merged builder takes `(repoProvider, resourceRepo, credentialProvider, digestProcessor)` — nil for unused optional params
 
 **Changes:**
 
-1. **Rename `constructor/spec/v1` → `constructor/v2`** (new module path: `ocm.software/.../constructor/v2`). The constructor format is based on the v2 descriptor schema; calling it `v2` aligns naming with `descriptor/v2`. The existing `constructor/spec/v1` module continues to exist as an alias/redirect during transition.
+1. **Rename `constructor/spec/v1` → `constructor/v2`** (new module path: `ocm.software/.../constructor/v2`). The constructor format is based on the v2 descriptor schema. The existing `constructor/spec/v1` module continues to exist as an alias/redirect during transition.
 
 2. **Extract `constructor/runtime` into its own module** (new module path: `ocm.software/.../constructor/runtime`). Contains:
-   - Runtime types: `Component`, `Resource`, `Source`, `AccessOrInput`, `Reference`, `Digest`, `Label`, `CopyPolicy`, etc. (currently in `constructor/runtime/constructor.go`)
-   - Conversion functions: `ConvertToV1Component`, `ConvertFromV2`, `ConvertToV2Resource`, etc. (currently in `constructor/runtime/convert_*.go`)
-   - Library interfaces: `ResourceInputMethod`, `SourceInputMethod`, result types, `ResourceConsumerIdentityProvider`, `SourceConsumerIdentityProvider`, `ExternalComponentRepositoryProvider` (currently in `constructor/interface.go`)
+   - Runtime types: `Component`, `Resource`, `Source`, `AccessOrInput`, `Reference`, `Digest`, `Label`, `CopyPolicy`, etc.
+   - Conversion functions: `ConvertToV1Component`, `ConvertFromV2`, `ConvertToV2Resource`, etc.
+   - Library interfaces: `ResourceInputMethod`, `SourceInputMethod`, result types, `ResourceConsumerIdentityProvider`, `SourceConsumerIdentityProvider`, `ExternalComponentRepositoryProvider`
    - Dependencies: `runtime`, `blob`, `descriptor/runtime`, `constructor/v2`, `repository` — all lightweight
 
-3. **Create `bindings/go/construct/` module** (new module path: `ocm.software/.../construct`). Receives the graph orchestration code from the constructor root:
-   - `BuildGraphDefinition` + options (from `constructor/constructor.go`, `constructor/options.go`)
-   - `NewDefaultBuilder` (from `constructor/builder.go`)
-   - `internal/graph/` (from `constructor/internal/graph/`)
-   - `spec/transformation/v1alpha1/` — `ComputeComponentDigest` spec (from `constructor/spec/transformation/`)
-   - `transformer/` — `ComputeComponentDigest` implementation (from `constructor/transformer/`)
-   - Dependencies: `constructor/runtime`, `constructor/v2`, `transform/`, `oci/`, `repository/`, `dag/`, `credentials/`, input packages
+3. **Create `bindings/go/graph/` module** (new module path: `ocm.software/.../graph`). Contains:
+   - `graph/construct/` — `BuildGraphDefinition` for construction (from `constructor/constructor.go`, `constructor/internal/graph/`)
+   - `graph/transfer/` — `BuildGraphDefinition` for transfer (from `transfer/transfer.go`, `transfer/internal/`)
+   - Shared `NewDefaultBuilder` registering all transformers (merged from `constructor/builder.go` and `transfer/builder.go`)
+   - Shared helpers: `identityToTransformationID`, `asUnstructured`, `chooseAddType`, etc. (deduplicated)
+   - `ComputeComponentDigest` spec + transformer (from `constructor/spec/transformation/`, `constructor/transformer/`)
 
-4. **Drop `ResourceDigestProcessor` from `constructor/interface.go`.** Use `repository.ResourceDigestProcessor` everywhere (same interface, already used by the actual transformers).
+4. **Drop `ResourceDigestProcessor` from `constructor/interface.go`.** Use `repository.ResourceDigestProcessor` everywhere.
 
-5. **Delete the old `constructor` root module** (`constructor/go.mod`). All its content has moved to either `constructor/runtime` (types + interfaces) or `construct/` (orchestration). The `constructor/` directory retains only the `v2/` and `runtime/` sub-modules.
+5. **Delete old modules:** `constructor/go.mod` and `transfer/go.mod`. Their content has moved to `constructor/runtime`, `constructor/v2`, and `graph/`.
 
 **Dependency impact:**
 
@@ -464,9 +490,9 @@ transfer/   ──→ descriptor/runtime,  descriptor/v2,  transform/, oci/, rep
 | `input/file`, `input/dir`, `input/utf8` | → full `constructor` module | → `constructor/runtime` (lightweight) |
 | `helm/input` | → full `constructor` module | → `constructor/runtime` (lightweight) |
 | `plugin/manager` | → full `constructor` module | → `constructor/runtime` (lightweight) |
-| `cli` (`add component-version`) | → `constructor` module | → `construct/` module |
-| `construct/` (new) | — | → `constructor/runtime`, `constructor/v2`, `transform/`, `oci/` |
-| `transfer/` | unchanged | unchanged |
+| `cli` (`add component-version`) | → `constructor` module | → `graph/construct` |
+| `cli` (`transfer component-version`) | → `transfer` module | → `graph/transfer` |
+| `graph/` (new) | — | → `constructor/runtime`, `constructor/v2`, `descriptor/*`, `transform/`, `oci/`, `helm/`, `signing/`, `input/*` |
 
 ---
 
@@ -498,14 +524,15 @@ func (t *FileInput) Transform(ctx context.Context, step runtime.Typed) (runtime.
 
 ---
 
-### Strategy 6: Optional Digest Processing in Transfer
+### Strategy 6: Digest Processing in Transfer
 
 **Goal:** Address M-3 for recursive transfers that modify content.
 
+**Note:** With Strategy 4 merging construct and transfer into `graph/`, `ComputeComponentDigest` is already registered in the shared builder. The remaining work is adding digest computation nodes in `graph/transfer`'s graph generation.
+
 **Approach:**
-1. Register `ComputeComponentDigest` in transfer's builder (behind a flag).
-2. Add digest computation nodes for referenced components in `fillGraphDefinitionWithPrefetchedComponents`.
-3. Wire reference digest propagation into transfer's upload transformation spec.
+1. Add `ComputeComponentDigest` nodes for referenced components in the transfer graph generator (behind a flag).
+2. Wire reference digest propagation into transfer's upload transformation spec.
 
 ---
 
@@ -532,8 +559,8 @@ func (t *FileInput) Transform(ctx context.Context, step runtime.Typed) (runtime.
 |---|-------|--------|--------|
 | 6 | A-2 | Rename `constructor/spec/v1` → `constructor/v2` per Strategy 4 | Small |
 | 7 | A-2 | Extract `constructor/runtime` into its own module with library interfaces per Strategy 4 | Medium |
-| 8 | A-2 | Create `bindings/go/construct/` module, move graph orchestration from constructor root per Strategy 4 | Large |
-| 9 | A-2 | Drop duplicate `ResourceDigestProcessor` from constructor, delete old constructor root module | Small |
+| 8 | A-2 | Create `bindings/go/graph/` module, merge construct + transfer graph generation per Strategy 4 | Large |
+| 9 | A-2 | Drop duplicate `ResourceDigestProcessor`, delete old `constructor` and `transfer` root modules | Small |
 | 10 | A-1 | Restore `InputMethod` types in `input/file`, `input/dir`, `input/utf8`, `helm/input` per Strategy 5 | Medium |
 | 11 | A-1 | Refactor transformers (`FileInput`, `DirInput`, `UTF8Input`, `HelmInput`) to delegate to restored `InputMethod` | Medium |
 

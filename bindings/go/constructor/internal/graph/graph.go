@@ -692,20 +692,43 @@ func buildConstructorDescriptorSpec(
 		for i, ref := range component.References {
 			if digestID, ok := referenceDigestIDs[i]; ok {
 				refMap := map[string]any{
-					"name":          fmt.Sprintf("${environment.%s.componentReferences[%d].name}", id, i),
-					"version":       fmt.Sprintf("${environment.%s.componentReferences[%d].version}", id, i),
-					"componentName": fmt.Sprintf("${environment.%s.componentReferences[%d].componentName}", id, i),
+					"name":          ref.Name,
+					"version":       ref.Version,
+					"componentName": ref.Component,
 					"digest":        fmt.Sprintf("${%s.output.digest}", digestID),
 				}
 				if ref.ExtraIdentity != nil {
-					refMap["extraIdentity"] = fmt.Sprintf("${environment.%s.componentReferences[%d].extraIdentity}", id, i)
+					refMap["extraIdentity"] = map[string]string(ref.ExtraIdentity)
 				}
 				if ref.Labels != nil {
-					refMap["labels"] = fmt.Sprintf("${environment.%s.componentReferences[%d].labels}", id, i)
+					labelsData, err := json.Marshal(ref.Labels)
+					if err == nil {
+						var labelsAny []any
+						if err := json.Unmarshal(labelsData, &labelsAny); err == nil {
+							refMap["labels"] = labelsAny
+						}
+					}
 				}
 				refsArray[i] = refMap
 			} else {
-				refsArray[i] = fmt.Sprintf("${environment.%s.componentReferences[%d]}", id, i)
+				refMap := map[string]any{
+					"name":          ref.Name,
+					"version":       ref.Version,
+					"componentName": ref.Component,
+				}
+				if ref.ExtraIdentity != nil {
+					refMap["extraIdentity"] = map[string]string(ref.ExtraIdentity)
+				}
+				if ref.Labels != nil {
+					labelsData, err := json.Marshal(ref.Labels)
+					if err == nil {
+						var labelsAny []any
+						if err := json.Unmarshal(labelsData, &labelsAny); err == nil {
+							refMap["labels"] = labelsAny
+						}
+					}
+				}
+				refsArray[i] = refMap
 			}
 		}
 		referencesSpec = refsArray
@@ -714,9 +737,9 @@ func buildConstructorDescriptorSpec(
 	}
 
 	componentMap := map[string]any{
-		"name":                fmt.Sprintf("${environment.%s.name}", id),
-		"version":             fmt.Sprintf("${environment.%s.version}", id),
-		"provider":            fmt.Sprintf("${environment.%s.provider.name}", id),
+		"name":                component.Name,
+		"version":             component.Version,
+		"provider":            component.Provider.Name,
 		"resources":           resourcesArray,
 		"sources":             sourcesSpec,
 		"componentReferences": referencesSpec,
@@ -724,11 +747,17 @@ func buildConstructorDescriptorSpec(
 	}
 
 	if component.CreationTime != "" {
-		componentMap["creationTime"] = fmt.Sprintf("${environment.%s.creationTime}", id)
+		componentMap["creationTime"] = component.CreationTime
 	}
 
 	if len(component.Labels) > 0 {
-		componentMap["labels"] = fmt.Sprintf("${environment.%s.labels}", id)
+		labelsData, err := json.Marshal(component.Labels)
+		if err == nil {
+			var labelsAny []any
+			if err := json.Unmarshal(labelsData, &labelsAny); err == nil {
+				componentMap["labels"] = labelsAny
+			}
+		}
 	}
 
 	return map[string]any{

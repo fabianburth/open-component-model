@@ -2,15 +2,13 @@ package transformation
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"ocm.software/open-component-model/bindings/go/blob/filesystem"
+	constructorruntime "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/v1"
 	dir "ocm.software/open-component-model/bindings/go/input/dir"
-	dirv1 "ocm.software/open-component-model/bindings/go/input/dir/spec/v1"
 	"ocm.software/open-component-model/bindings/go/input/dir/transformation/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
@@ -36,27 +34,18 @@ func (t *DirInput) Transform(ctx context.Context, step runtime.Typed) (runtime.T
 		return nil, fmt.Errorf("resource with input is required for dir input transformation")
 	}
 
-	// Deserialize input-specific attributes from Resource.Input
-	var v1Dir dirv1.Dir
-	if err := json.Unmarshal(spec.Resource.Input.Data, &v1Dir); err != nil {
-		return nil, fmt.Errorf("failed deserializing dir input from resource: %w", err)
-	}
-
-	if v1Dir.Path == "" {
-		return nil, fmt.Errorf("path is required for dir input transformation")
-	}
-
-	// Resolve relative paths against the working directory.
-	// GetV1DirBlob uses GetBlobFromPath which expects an absolute path for os.Stat.
-	dirPath := v1Dir.Path
-	if !filepath.IsAbs(dirPath) && spec.WorkingDirectory != "" {
-		dirPath = filepath.Join(spec.WorkingDirectory, dirPath)
-	}
-	v1Dir.Path = dirPath
-
-	blob, err := dir.GetV1DirBlob(ctx, v1Dir, spec.WorkingDirectory)
+	method, err := dir.NewInputMethod(spec.WorkingDirectory)
 	if err != nil {
-		return nil, fmt.Errorf("failed getting dir blob: %w", err)
+		return nil, fmt.Errorf("failed creating dir input method: %w", err)
+	}
+
+	result, err := method.ProcessResource(ctx, &constructorruntime.Resource{
+		AccessOrInput: constructorruntime.AccessOrInput{
+			Input: spec.Resource.Input,
+		},
+	}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed processing dir input: %w", err)
 	}
 
 	// Determine output path
@@ -66,7 +55,7 @@ func (t *DirInput) Transform(ctx context.Context, step runtime.Typed) (runtime.T
 	}
 
 	// Buffer blob to file spec
-	fileSpec, err := filesystem.BlobToSpec(blob, outputPath)
+	fileSpec, err := filesystem.BlobToSpec(result.ProcessedBlobData, outputPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed buffering blob to file: %w", err)
 	}

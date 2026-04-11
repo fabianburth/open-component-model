@@ -2,14 +2,13 @@ package transformation
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 
 	"ocm.software/open-component-model/bindings/go/blob/filesystem"
+	constructorruntime "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/v1"
 	file "ocm.software/open-component-model/bindings/go/input/file"
-	filev1 "ocm.software/open-component-model/bindings/go/input/file/spec/v1"
 	"ocm.software/open-component-model/bindings/go/input/file/transformation/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
@@ -35,19 +34,18 @@ func (t *FileInput) Transform(ctx context.Context, step runtime.Typed) (runtime.
 		return nil, fmt.Errorf("resource with input is required for file input transformation")
 	}
 
-	// Deserialize input-specific attributes from Resource.Input
-	var v1File filev1.File
-	if err := json.Unmarshal(spec.Resource.Input.Data, &v1File); err != nil {
-		return nil, fmt.Errorf("failed deserializing file input from resource: %w", err)
-	}
-
-	if v1File.Path == "" {
-		return nil, fmt.Errorf("path is required for file input transformation")
-	}
-
-	blob, err := file.GetV1FileBlob(v1File, spec.WorkingDirectory)
+	method, err := file.NewInputMethod(spec.WorkingDirectory)
 	if err != nil {
-		return nil, fmt.Errorf("failed getting file blob: %w", err)
+		return nil, fmt.Errorf("failed creating file input method: %w", err)
+	}
+
+	result, err := method.ProcessResource(ctx, &constructorruntime.Resource{
+		AccessOrInput: constructorruntime.AccessOrInput{
+			Input: spec.Resource.Input,
+		},
+	}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed processing file input: %w", err)
 	}
 
 	// Determine output path
@@ -57,7 +55,7 @@ func (t *FileInput) Transform(ctx context.Context, step runtime.Typed) (runtime.
 	}
 
 	// Buffer blob to file spec
-	fileSpec, err := filesystem.BlobToSpec(blob, outputPath)
+	fileSpec, err := filesystem.BlobToSpec(result.ProcessedBlobData, outputPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed buffering blob to file: %w", err)
 	}

@@ -2,14 +2,13 @@ package transformation
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 
 	"ocm.software/open-component-model/bindings/go/blob/filesystem"
+	constructorruntime "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/v1"
 	utf8pkg "ocm.software/open-component-model/bindings/go/input/utf8"
-	v1 "ocm.software/open-component-model/bindings/go/input/utf8/spec/v1"
 	"ocm.software/open-component-model/bindings/go/input/utf8/transformation/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
@@ -35,15 +34,15 @@ func (t *UTF8Input) Transform(ctx context.Context, step runtime.Typed) (runtime.
 		return nil, fmt.Errorf("resource with input is required for utf8 input transformation")
 	}
 
-	// Deserialize input-specific attributes from Resource.Input
-	var v1UTF8 v1.UTF8
-	if err := json.Unmarshal(spec.Resource.Input.Data, &v1UTF8); err != nil {
-		return nil, fmt.Errorf("failed deserializing utf8 input from resource: %w", err)
-	}
+	method := utf8pkg.NewInputMethod()
 
-	blob, err := utf8pkg.GetV1UTF8Blob(v1UTF8)
+	result, err := method.ProcessResource(ctx, &constructorruntime.Resource{
+		AccessOrInput: constructorruntime.AccessOrInput{
+			Input: spec.Resource.Input,
+		},
+	}, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed getting utf8 blob: %w", err)
+		return nil, fmt.Errorf("failed processing utf8 input: %w", err)
 	}
 
 	// Determine output path
@@ -53,7 +52,7 @@ func (t *UTF8Input) Transform(ctx context.Context, step runtime.Typed) (runtime.
 	}
 
 	// Buffer blob to file spec
-	fileSpec, err := filesystem.BlobToSpec(blob, outputPath)
+	fileSpec, err := filesystem.BlobToSpec(result.ProcessedBlobData, outputPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed buffering blob to file: %w", err)
 	}

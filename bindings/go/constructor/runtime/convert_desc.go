@@ -76,12 +76,21 @@ func ConvertElementMetaFromDescriptor(meta descriptor.ElementMeta) ElementMeta {
 }
 
 // ConvertAccessToDescriptor converts runtime AccessOrInput to descriptor Typed.
-// Returns nil if the input Access is nil.
+// If the resource has an explicit Access it is returned; if only Input is set a
+// localBlob/v1 placeholder is produced (the real access is determined later
+// during transfer). Returns nil when both fields are nil.
 func ConvertAccessToDescriptor(accessOrInput AccessOrInput) runtime.Typed {
-	if accessOrInput.Access == nil {
+	switch {
+	case accessOrInput.Access != nil:
+		return accessOrInput.Access.DeepCopyTyped()
+	case accessOrInput.Input != nil:
+		return &runtime.Raw{
+			Type: runtime.NewVersionedType("localBlob", "v1"),
+			Data: []byte(`{"type":"localBlob/v1"}`),
+		}
+	default:
 		return nil
 	}
-	return accessOrInput.Access.DeepCopyTyped()
 }
 
 // ConvertAccessFromDescriptor converts descriptor Typed to runtime AccessOrInput.

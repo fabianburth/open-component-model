@@ -60,6 +60,42 @@ func TestConvertToDescriptorResource(t *testing.T) {
 			},
 		},
 		{
+			name: "resource with input only produces localBlob placeholder",
+			input: &Resource{
+				ElementMeta: ElementMeta{
+					ObjectMeta: ObjectMeta{
+						Name:    "input-resource",
+						Version: "1.0.0",
+					},
+				},
+				Type:     "blob",
+				Relation: LocalRelation,
+				AccessOrInput: AccessOrInput{
+					Input: &runtime.Raw{
+						Type: runtime.Type{
+							Version: "v1",
+							Name:    "file",
+						},
+						Data: []byte(`{"type":"file/v1","path":"myfile.txt"}`),
+					},
+				},
+			},
+			expected: &descriptor.Resource{
+				ElementMeta: descriptor.ElementMeta{
+					ObjectMeta: descriptor.ObjectMeta{
+						Name:    "input-resource",
+						Version: "1.0.0",
+					},
+				},
+				Type:     "blob",
+				Relation: descriptor.LocalRelation,
+				Access: &runtime.Raw{
+					Type: runtime.NewVersionedType("localBlob", "v1"),
+					Data: []byte(`{"type":"localBlob/v1"}`),
+				},
+			},
+		},
+		{
 			name: "resource with labels",
 			input: &Resource{
 				ElementMeta: ElementMeta{

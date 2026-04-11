@@ -1,12 +1,9 @@
 package internal
 
 import (
-	"context"
-
 	"ocm.software/open-component-model/bindings/go/blob"
 	constructor "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	descriptor "ocm.software/open-component-model/bindings/go/descriptor/runtime"
-	"ocm.software/open-component-model/bindings/go/repository"
 )
 
 // ComponentVersionConflictPolicy defines the policy for handling component version conflicts.
@@ -25,11 +22,6 @@ const (
 	ExternalComponentVersionCopyPolicySkip ExternalComponentVersionCopyPolicy = iota
 	ExternalComponentVersionCopyPolicyCopyOrFail
 )
-
-// ExternalComponentRepositoryProvider returns the repository for resolving external components.
-type ExternalComponentRepositoryProvider interface {
-	GetExternalRepository(ctx context.Context, name, version string) (repository.ComponentVersionRepository, error)
-}
 
 // ConstructorOrExternalComponent holds either a constructor component or an external component.
 type ConstructorOrExternalComponent struct {

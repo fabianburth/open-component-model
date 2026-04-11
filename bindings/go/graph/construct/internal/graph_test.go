@@ -14,19 +14,30 @@ import (
 	descriptor "ocm.software/open-component-model/bindings/go/descriptor/runtime"
 	"ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/oci"
 	"ocm.software/open-component-model/bindings/go/repository"
+	"ocm.software/open-component-model/bindings/go/repository/component/resolvers"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 
-type mockExternalRepoProvider struct {
+type mockExternalRepoResolver struct {
 	repos map[string]repository.ComponentVersionRepository
 }
 
-func (m *mockExternalRepoProvider) GetExternalRepository(_ context.Context, name, version string) (repository.ComponentVersionRepository, error) {
+var _ resolvers.ComponentVersionRepositoryResolver = (*mockExternalRepoResolver)(nil)
+
+func (m *mockExternalRepoResolver) GetComponentVersionRepositoryForComponent(_ context.Context, name, version string) (repository.ComponentVersionRepository, error) {
 	key := name + ":" + version
 	if repo, ok := m.repos[key]; ok {
 		return repo, nil
 	}
 	return nil, fmt.Errorf("external repo not found for %s: %w", key, repository.ErrNotFound)
+}
+
+func (m *mockExternalRepoResolver) GetComponentVersionRepositoryForSpecification(_ context.Context, _ runtime.Typed) (repository.ComponentVersionRepository, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+func (m *mockExternalRepoResolver) GetRepositorySpecificationForComponent(_ context.Context, _, _ string) (runtime.Typed, error) {
+	return nil, fmt.Errorf("not implemented")
 }
 
 func TestBuildGraphDefinition_EmptyConstructor(t *testing.T) {
@@ -379,7 +390,7 @@ func TestBuildGraphDefinition_ExternalComponentSkip(t *testing.T) {
 	}
 
 	tgd, err := graph.BuildGraphDefinition(ctx, cc, target, "/tmp/workdir",
-		&mockExternalRepoProvider{repos: map[string]repository.ComponentVersionRepository{
+		&mockExternalRepoResolver{repos: map[string]repository.ComponentVersionRepository{
 			"example.com/external:1.0.0": extRepo,
 		}},
 		graph.ExternalComponentVersionCopyPolicySkip,

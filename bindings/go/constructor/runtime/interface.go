@@ -5,7 +5,6 @@ import (
 
 	"ocm.software/open-component-model/bindings/go/blob"
 	descriptor "ocm.software/open-component-model/bindings/go/descriptor/runtime"
-	"ocm.software/open-component-model/bindings/go/repository"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 
@@ -83,11 +82,6 @@ type SourceInputMethodResult struct {
 type SourceInputMethod interface {
 	SourceConsumerIdentityProvider
 	ProcessSource(ctx context.Context, source *Source, credentials map[string]string) (result *SourceInputMethodResult, err error)
-}
-
-// ExternalComponentRepositoryProvider returns the target ocm repository for the given component specification in the constructor.
-type ExternalComponentRepositoryProvider interface {
-	GetExternalRepository(ctx context.Context, name, version string) (repository.ComponentVersionRepository, error)
 }
 
 // ResourceConsumerIdentityProvider resolves the identity of the given [Resource] to use for credential resolution.

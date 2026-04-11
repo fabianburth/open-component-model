@@ -1,7 +1,7 @@
 package construct
 
 import (
-	constructorruntime "ocm.software/open-component-model/bindings/go/constructor/runtime"
+	"ocm.software/open-component-model/bindings/go/repository/component/resolvers"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 
@@ -18,10 +18,10 @@ type ConstructOptions struct {
 	// OPTIONAL — defaults to "".
 	WorkingDirectory string
 
-	// ExternalComponentRepositoryProvider resolves external component references
+	// ExternalComponentRepositoryResolver resolves external component references
 	// not part of the constructor specification.
 	// OPTIONAL.
-	ExternalComponentRepositoryProvider constructorruntime.ExternalComponentRepositoryProvider
+	ExternalComponentRepositoryResolver resolvers.ComponentVersionRepositoryResolver
 
 	// ComponentVersionConflictPolicy determines how to handle conflicts
 	// when a component version already exists in the target repository.
@@ -51,10 +51,10 @@ func WithWorkingDirectory(dir string) Option {
 	}
 }
 
-// WithExternalComponentRepository sets the provider for resolving external component references.
-func WithExternalComponentRepository(p constructorruntime.ExternalComponentRepositoryProvider) Option {
+// WithExternalComponentRepository sets the resolver for resolving external component references.
+func WithExternalComponentRepository(r resolvers.ComponentVersionRepositoryResolver) Option {
 	return func(o *ConstructOptions) {
-		o.ExternalComponentRepositoryProvider = p
+		o.ExternalComponentRepositoryResolver = r
 	}
 }
 

@@ -32,7 +32,7 @@ func BuildGraphDefinition(
 	return graph.BuildGraphDefinition(ctx, spec,
 		o.TargetRepositorySpec,
 		o.WorkingDirectory,
-		o.ExternalComponentRepositoryProvider,
+		o.ExternalComponentRepositoryResolver,
 		graph.ExternalComponentVersionCopyPolicy(o.ExternalComponentVersionCopyPolicy),
 		graph.ComponentVersionConflictPolicy(o.ComponentVersionConflictPolicy),
 		o.SkipDigestProcessing,

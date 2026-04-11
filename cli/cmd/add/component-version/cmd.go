@@ -2,7 +2,6 @@ package componentversion
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,7 +21,6 @@ import (
 	ctfv1 "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/ctf"
 	ociv1 "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/oci"
 	"ocm.software/open-component-model/bindings/go/repository"
-	"ocm.software/open-component-model/bindings/go/repository/component/resolvers"
 	"ocm.software/open-component-model/bindings/go/runtime"
 	graphRuntime "ocm.software/open-component-model/bindings/go/transform/graph/runtime"
 	transformv1alpha1 "ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1"
@@ -374,7 +372,7 @@ func AddComponentVersion(cmd *cobra.Command, _ []string) error {
 	tgd, err := construct.BuildGraphDefinition(ctx, constructorSpec,
 		construct.WithTargetRepository(repoSpec),
 		construct.WithWorkingDirectory(workingDir),
-		construct.WithExternalComponentRepository(&externalRepoProvider{resolver: repoResolver}),
+		construct.WithExternalComponentRepository(repoResolver),
 		construct.WithConflictPolicy(ComponentVersionConflictPolicy(cvConflictPolicy).ToConstructorConflictPolicy()),
 		construct.WithExternalCopyPolicy(ExternalComponentVersionCopyPolicy(evCopyPolicy).ToConstructorPolicy()),
 		construct.WithSkipDigestProcessing(skipReferenceDigestProcessing),
@@ -518,19 +516,6 @@ func getComponentConstructorFile(cmd *cobra.Command) (*file.Flag, error) {
 		return nil, fmt.Errorf("path %q is a directory but must point to a component constructor", constructorFlag.String())
 	}
 	return constructorFlag, nil
-}
-
-// externalRepoProvider wraps a ComponentVersionRepositoryResolver to implement
-// the constructor.ExternalComponentRepositoryProvider interface.
-type externalRepoProvider struct {
-	resolver resolvers.ComponentVersionRepositoryResolver
-}
-
-func (p *externalRepoProvider) GetExternalRepository(ctx context.Context, name, version string) (repository.ComponentVersionRepository, error) {
-	if p.resolver == nil {
-		return nil, fmt.Errorf("cannot fetch external component version %s:%s: no repository provider configured", name, version)
-	}
-	return p.resolver.GetComponentVersionRepositoryForComponent(ctx, name, version)
 }
 
 func renderTGD(tgd *transformv1alpha1.TransformationGraphDefinition, format string) (io.ReadCloser, error) {

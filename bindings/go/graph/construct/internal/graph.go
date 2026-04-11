@@ -14,6 +14,7 @@ import (
 	syncdag "ocm.software/open-component-model/bindings/go/dag/sync"
 	descruntime "ocm.software/open-component-model/bindings/go/descriptor/runtime"
 	descriptorv2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
+	"ocm.software/open-component-model/bindings/go/repository/component/resolvers"
 	"ocm.software/open-component-model/bindings/go/runtime"
 	transformv1alpha1 "ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1/meta"
@@ -34,7 +35,7 @@ func BuildGraphDefinition(
 	componentConstructor *constructor.ComponentConstructor,
 	targetRepoSpec runtime.Typed,
 	workingDirectory string,
-	externalComponentRepoProvider ExternalComponentRepositoryProvider,
+	externalComponentRepoResolver resolvers.ComponentVersionRepositoryResolver,
 	externalCopyPolicy ExternalComponentVersionCopyPolicy,
 	conflictPolicy ComponentVersionConflictPolicy,
 	skipDigestProcessing bool,
@@ -54,7 +55,7 @@ func BuildGraphDefinition(
 
 	resAndDis := &resolverAndDiscoverer{
 		componentConstructor:      componentConstructor,
-		externalRepoProvider:      externalComponentRepoProvider,
+		externalRepoResolver:      externalComponentRepoResolver,
 		resolveExternalLocalBlobs: externalCopyPolicy == ExternalComponentVersionCopyPolicyCopyOrFail,
 	}
 

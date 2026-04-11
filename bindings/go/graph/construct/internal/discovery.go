@@ -13,6 +13,7 @@ import (
 	descriptor "ocm.software/open-component-model/bindings/go/descriptor/runtime"
 	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	"ocm.software/open-component-model/bindings/go/repository"
+	"ocm.software/open-component-model/bindings/go/repository/component/resolvers"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 
@@ -20,7 +21,7 @@ import (
 // It first checks constructor components, then falls back to external repositories.
 type resolverAndDiscoverer struct {
 	componentConstructor      *constructor.ComponentConstructor
-	externalRepoProvider      ExternalComponentRepositoryProvider
+	externalRepoResolver      resolvers.ComponentVersionRepositoryResolver
 	resolveExternalLocalBlobs bool
 }
 
@@ -81,7 +82,7 @@ func (d *resolverAndDiscoverer) resolveExternalComponent(ctx context.Context, id
 	if err != nil {
 		return nil, fmt.Errorf("failed parsing identity %q: %w", id, err)
 	}
-	repo, err := d.externalRepoProvider.GetExternalRepository(ctx, identity[descriptor.IdentityAttributeName], identity[descriptor.IdentityAttributeVersion])
+	repo, err := d.externalRepoResolver.GetComponentVersionRepositoryForComponent(ctx, identity[descriptor.IdentityAttributeName], identity[descriptor.IdentityAttributeVersion])
 	if err != nil {
 		return nil, fmt.Errorf("error getting external repository for component %q: %w", identity.String(), err)
 	}

@@ -538,6 +538,12 @@ func (t *FileInput) Transform(ctx context.Context, step runtime.Typed) (runtime.
 
 ## Prioritized Action Items
 
+### Implementation Note: Go Workspace for Unpublished Modules
+
+Phase 3 introduces new modules (`constructor/v2`, `constructor/runtime`, `graph/`) that will not be published to a module proxy at the time of implementation. The Go workspace (`go.work`) must include the new module directories so that local resolution works without published versions.
+
+Use `task init/go.work` to regenerate the workspace after creating new modules. The workspace ensures `go build` and `go test` resolve all local modules against each other. Note that `go mod tidy` does **not** respect the workspace — it resolves against the module proxy and will fail for unpublished modules. Defer `task tidy` until the new modules are published.
+
 ### Phase 1: Bug Fixes (Immediate)
 
 | # | Issue | Action | Effort |

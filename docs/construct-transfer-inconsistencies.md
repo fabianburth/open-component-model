@@ -195,6 +195,7 @@ The constructor maintains *both* functions. This is the largest source of code d
 | L-5 | Different resource access type breadth | Complementary. Constructor handles inputs; transfer handles Get/Add chains for LocalBlob, OCI, Helm. |
 | L-6 | Upload type modes only in transfer | Constructor doesn't need this flexibility today. |
 | L-7 | Different builder transformer registration sets | Correct -- each builder is tailored to its domain. |
+| L-8 | Inconsistent transformer/spec directory layout across packages | OCI uses `transformer/` (impl) + `spec/transformation/v1alpha1/` (specs) as separate top-level directories. Helm access and all input packages use `transformation/` with `spec/v1alpha1/` nested inside and implementations flat alongside. The latter is cleaner — a single `transformation/` directory with `spec/` for specs and implementations at the top level. OCI should be aligned to match. |
 
 ---
 

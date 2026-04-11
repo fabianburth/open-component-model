@@ -79,21 +79,13 @@ func chooseAddLocalResourceType(repo runtime.Typed) (runtime.Type, error) {
 func chooseAddLocalSourceType(repo runtime.Typed) (runtime.Type, error) {
 	switch repo.(type) {
 	case *oci.Repository:
-		return ociAddLocalSourceV1alpha1, nil
+		return ociv1alpha1.OCIAddLocalSourceV1alpha1, nil
 	case *ctfv1.Repository:
-		return ctfAddLocalSourceV1alpha1, nil
+		return ociv1alpha1.CTFAddLocalSourceV1alpha1, nil
 	default:
 		return runtime.Type{}, fmt.Errorf("unsupported repository type %T for add local source operation", repo)
 	}
 }
-
-// AddLocalSource type constants.
-// These match the types defined in the OCI transformation spec package.
-// We define them here because the published OCI module version may not yet include them.
-var (
-	ociAddLocalSourceV1alpha1 = runtime.NewVersionedType("OCIAddLocalSource", "v1alpha1")
-	ctfAddLocalSourceV1alpha1 = runtime.NewVersionedType("CTFAddLocalSource", "v1alpha1")
-)
 
 // chooseGetLocalResourceType selects the GetLocalResource type based on source repository type.
 func chooseGetLocalResourceType(repo runtime.Typed) (runtime.Type, error) {

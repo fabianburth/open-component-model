@@ -105,9 +105,13 @@ func fillGraphDefinition(
 	slog.DebugContext(ctx, "building transformations for discovered components",
 		"components", len(d.Vertices))
 
-	// Collect expected digests from constructor references before building nodes.
+	// Collect expected digests and referenced component IDs from constructor references.
 	// Key: referenced component's digest transformation ID, Value: expected digest.
 	expectedDigests := make(map[string]*constructor.Digest)
+	// referencedComponents tracks which components are referenced by others and thus
+	// need a ComputeComponentDigest transformation. Components not in this set don't
+	// need their digest computed since no other component consumes it.
+	referencedComponents := make(map[string]struct{})
 	if !skipDigestProcessing {
 		for _, v := range d.Vertices {
 			val := v.Attributes[syncdag.AttributeValue].(*ConstructorOrExternalComponent)
@@ -115,10 +119,11 @@ func fillGraphDefinition(
 				continue
 			}
 			for _, ref := range val.ConstructorComponent.References {
+				refCompID := identityToTransformationID(ref.ToComponentIdentity())
+				referencedComponents[refCompID] = struct{}{}
 				if ref.Digest == nil {
 					continue
 				}
-				refCompID := identityToTransformationID(ref.ToComponentIdentity())
 				expectedDigests[refCompID+"Digest"] = ref.Digest
 			}
 		}
@@ -129,11 +134,11 @@ func fillGraphDefinition(
 
 		switch {
 		case val.ConstructorComponent != nil:
-			if err := processConstructorComponent(ctx, val.ConstructorComponent, key, tgd, targetRepoSpec, workingDirectory, skipDigestProcessing, expectedDigests); err != nil {
+			if err := processConstructorComponent(ctx, val.ConstructorComponent, key, tgd, targetRepoSpec, workingDirectory, skipDigestProcessing, expectedDigests, referencedComponents); err != nil {
 				return fmt.Errorf("error processing constructor component %s: %w", key, err)
 			}
 		case val.ExternalComponent != nil:
-			if err := processExternalComponent(ctx, val.ExternalComponent, key, tgd, targetRepoSpec, externalCopyPolicy, skipDigestProcessing, expectedDigests); err != nil {
+			if err := processExternalComponent(ctx, val.ExternalComponent, key, tgd, targetRepoSpec, externalCopyPolicy, skipDigestProcessing, expectedDigests, referencedComponents); err != nil {
 				return fmt.Errorf("error processing external component %s: %w", key, err)
 			}
 		default:
@@ -155,6 +160,7 @@ func processConstructorComponent(
 	workingDirectory string,
 	skipDigestProcessing bool,
 	expectedDigests map[string]*constructor.Digest,
+	referencedComponents map[string]struct{},
 ) error {
 	baseID := identityToTransformationID(component.ToIdentity())
 
@@ -241,9 +247,11 @@ func processConstructorComponent(
 		return err
 	}
 
-	// Add ComputeComponentDigest for this component so others can reference its digest
+	// Add ComputeComponentDigest only if another component references this one
 	if !skipDigestProcessing {
-		addComputeDigestTransformation(baseID, true, expectedDigests[baseID+"Digest"], tgd)
+		if _, isReferenced := referencedComponents[baseID]; isReferenced {
+			addComputeDigestTransformation(baseID, true, expectedDigests[baseID+"Digest"], tgd)
+		}
 	}
 
 	return nil
@@ -259,6 +267,7 @@ func processExternalComponent(
 	copyPolicy ExternalComponentVersionCopyPolicy,
 	skipDigestProcessing bool,
 	expectedDigests map[string]*constructor.Digest,
+	referencedComponents map[string]struct{},
 ) error {
 	baseID := identityToTransformationID(extComp.Descriptor.Component.ToIdentity())
 
@@ -345,11 +354,12 @@ func processExternalComponent(
 		}
 	}
 
-	// Always add ComputeComponentDigest for external components
-	// so referencing constructor components can access the digest
+	// Add ComputeComponentDigest only if another component references this one
 	if !skipDigestProcessing {
-		hasUpload := copyPolicy == ExternalComponentVersionCopyPolicyCopyOrFail
-		addComputeDigestTransformation(baseID, hasUpload, expectedDigests[baseID+"Digest"], tgd)
+		if _, isReferenced := referencedComponents[baseID]; isReferenced {
+			hasUpload := copyPolicy == ExternalComponentVersionCopyPolicyCopyOrFail
+			addComputeDigestTransformation(baseID, hasUpload, expectedDigests[baseID+"Digest"], tgd)
+		}
 	}
 
 	return nil

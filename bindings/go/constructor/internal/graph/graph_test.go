@@ -98,8 +98,9 @@ func TestBuildGraphDefinition_SimpleComponent(t *testing.T) {
 	r.NoError(err)
 	r.NotNil(tgd)
 
-	// Should have: FileInput + AddLocalResource + AddComponentVersion + ComputeComponentDigest
-	r.Len(tgd.Transformations, 4, "expected 4 transformations")
+	// Should have: FileInput + AddLocalResource + AddComponentVersion
+	// No ComputeComponentDigest because no other component references this one.
+	r.Len(tgd.Transformations, 3, "expected 3 transformations")
 
 	// Verify types
 	types := make([]string, len(tgd.Transformations))
@@ -109,7 +110,6 @@ func TestBuildGraphDefinition_SimpleComponent(t *testing.T) {
 	r.Contains(types, "FileInput/v1alpha1")
 	r.Contains(types, "OCIAddLocalResource/v1alpha1")
 	r.Contains(types, "OCIAddComponentVersion/v1alpha1")
-	r.Contains(types, "ComputeComponentDigest/v1alpha1")
 
 	// Verify environment has the component in constructor format (not descriptor format)
 	r.NotEmpty(tgd.Environment.Data)
@@ -186,8 +186,9 @@ func TestBuildGraphDefinition_ComponentWithSource(t *testing.T) {
 		graph.ComponentVersionConflictReplace, false)
 	r.NoError(err)
 
-	// Should have: FileInput(src) + AddLocalSource + AddComponentVersion + ComputeComponentDigest
-	r.Len(tgd.Transformations, 4)
+	// Should have: FileInput(src) + AddLocalSource + AddComponentVersion
+	// No ComputeComponentDigest because no other component references this one.
+	r.Len(tgd.Transformations, 3)
 
 	types := make([]string, len(tgd.Transformations))
 	for i, t := range tgd.Transformations {
@@ -196,7 +197,6 @@ func TestBuildGraphDefinition_ComponentWithSource(t *testing.T) {
 	r.Contains(types, "FileInput/v1alpha1")
 	r.Contains(types, "OCIAddLocalSource/v1alpha1")
 	r.Contains(types, "OCIAddComponentVersion/v1alpha1")
-	r.Contains(types, "ComputeComponentDigest/v1alpha1")
 }
 
 func TestBuildGraphDefinition_ComponentWithByReferenceResource(t *testing.T) {
@@ -247,8 +247,9 @@ func TestBuildGraphDefinition_ComponentWithByReferenceResource(t *testing.T) {
 		graph.ComponentVersionConflictReplace, false)
 	r.NoError(err)
 
-	// By-reference resource: ProcessOCIResourceDigest + AddComponentVersion + ComputeComponentDigest
-	r.Len(tgd.Transformations, 3)
+	// By-reference resource: ProcessOCIResourceDigest + AddComponentVersion
+	// No ComputeComponentDigest because no other component references this one.
+	r.Len(tgd.Transformations, 2)
 
 	types := make([]string, len(tgd.Transformations))
 	for i, t := range tgd.Transformations {
@@ -256,7 +257,6 @@ func TestBuildGraphDefinition_ComponentWithByReferenceResource(t *testing.T) {
 	}
 	r.Contains(types, "ProcessOCIResourceDigest/v1alpha1")
 	r.Contains(types, "OCIAddComponentVersion/v1alpha1")
-	r.Contains(types, "ComputeComponentDigest/v1alpha1")
 }
 
 func TestBuildGraphDefinition_ComponentWithReference(t *testing.T) {
@@ -309,10 +309,10 @@ func TestBuildGraphDefinition_ComponentWithReference(t *testing.T) {
 	r.NoError(err)
 	r.NotNil(tgd)
 
-	// Component A: AddComponentVersion + ComputeComponentDigest
-	// Component B: AddComponentVersion + ComputeComponentDigest
-	// Total: 4 transformations
-	r.Len(tgd.Transformations, 4)
+	// Component A: AddComponentVersion + ComputeComponentDigest (referenced by B)
+	// Component B: AddComponentVersion (not referenced by anyone)
+	// Total: 3 transformations
+	r.Len(tgd.Transformations, 3)
 
 	// Check that B's upload references A's digest
 	var compBUpload *runtime.Unstructured
@@ -397,9 +397,9 @@ func TestBuildGraphDefinition_ExternalComponentSkip(t *testing.T) {
 	r.NotNil(tgd)
 
 	// External component with Skip policy: only ComputeComponentDigest (no upload)
-	// Constructor component A: AddComponentVersion + ComputeComponentDigest
-	// External component E: ComputeComponentDigest only (no upload with Skip policy)
-	r.Len(tgd.Transformations, 3)
+	// Constructor component A: AddComponentVersion (not referenced by anyone else)
+	// External component E: ComputeComponentDigest only (referenced by A, no upload with Skip policy)
+	r.Len(tgd.Transformations, 2)
 
 	// Verify environment has both descriptors
 	r.Len(tgd.Environment.Data, 2)
@@ -569,8 +569,9 @@ func TestBuildGraphDefinition_MixedInputAndAccessResources(t *testing.T) {
 	r.NoError(err)
 	r.NotNil(tgd)
 
-	// Should have: FileInput + AddLocalResource + ProcessOCIResourceDigest + AddComponentVersion + ComputeComponentDigest
-	r.Len(tgd.Transformations, 5)
+	// Should have: FileInput + AddLocalResource + ProcessOCIResourceDigest + AddComponentVersion
+	// No ComputeComponentDigest because no other component references this one.
+	r.Len(tgd.Transformations, 4)
 
 	// Verify environment preserves both input and access correctly
 	envData, ok := tgd.Environment.Data["constructExampleComMixed100"].(map[string]any)

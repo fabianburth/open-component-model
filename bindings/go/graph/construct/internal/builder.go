@@ -13,8 +13,8 @@ import (
 	utf8transformation "ocm.software/open-component-model/bindings/go/input/utf8/transformation"
 	utf8v1alpha1 "ocm.software/open-component-model/bindings/go/input/utf8/transformation/spec/v1alpha1"
 	ociaccess "ocm.software/open-component-model/bindings/go/oci/spec/access"
-	ociv1alpha1 "ocm.software/open-component-model/bindings/go/oci/spec/transformation/v1alpha1"
-	ocitransformer "ocm.software/open-component-model/bindings/go/oci/transformer"
+	ociv1alpha1 "ocm.software/open-component-model/bindings/go/oci/transformation/spec/v1alpha1"
+	ocitransformation "ocm.software/open-component-model/bindings/go/oci/transformation"
 	"ocm.software/open-component-model/bindings/go/repository"
 	"ocm.software/open-component-model/bindings/go/runtime"
 	"ocm.software/open-component-model/bindings/go/transform/graph/builder"
@@ -37,28 +37,28 @@ func NewDefaultBuilder(
 	transformerScheme.MustRegisterScheme(signingv1alpha1.Scheme)
 
 	// OCI/CTF component version transformers
-	ociAdd := &ocitransformer.AddComponentVersion{
+	ociAdd := &ocitransformation.AddComponentVersion{
 		Scheme:             transformerScheme,
 		RepoProvider:       repoProvider,
 		CredentialProvider: credentialProvider,
 	}
 
 	// Local resource transformers
-	ociAddResource := &ocitransformer.AddLocalResource{
+	ociAddResource := &ocitransformation.AddLocalResource{
 		Scheme:             transformerScheme,
 		RepoProvider:       repoProvider,
 		CredentialProvider: credentialProvider,
 	}
 
 	// Local source transformers
-	ociAddSource := &ocitransformer.AddLocalSource{
+	ociAddSource := &ocitransformation.AddLocalSource{
 		Scheme:             transformerScheme,
 		RepoProvider:       repoProvider,
 		CredentialProvider: credentialProvider,
 	}
 
 	// Get local resource (for external component copy)
-	ociGetResource := &ocitransformer.GetLocalResource{
+	ociGetResource := &ocitransformation.GetLocalResource{
 		Scheme:             transformerScheme,
 		RepoProvider:       repoProvider,
 		CredentialProvider: credentialProvider,
@@ -98,7 +98,7 @@ func NewDefaultBuilder(
 
 	// Resource digest processing (optional — only when a processor is provided)
 	if digestProcessor != nil {
-		processDigest := &ocitransformer.ProcessResourceDigest{
+		processDigest := &ocitransformation.ProcessResourceDigest{
 			Scheme:             transformerScheme,
 			DigestProcessor:    digestProcessor,
 			CredentialProvider: credentialProvider,

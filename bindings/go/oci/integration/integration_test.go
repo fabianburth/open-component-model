@@ -52,9 +52,9 @@ import (
 	"ocm.software/open-component-model/bindings/go/oci/spec/layout"
 	ctfrepospecv1 "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/ctf"
 	ocirepospecv1 "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/oci"
-	"ocm.software/open-component-model/bindings/go/oci/spec/transformation/v1alpha1"
+	"ocm.software/open-component-model/bindings/go/oci/transformation/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/oci/tar"
-	"ocm.software/open-component-model/bindings/go/oci/transformer"
+	"ocm.software/open-component-model/bindings/go/oci/transformation"
 	"ocm.software/open-component-model/bindings/go/repository"
 	ocmruntime "ocm.software/open-component-model/bindings/go/runtime"
 )

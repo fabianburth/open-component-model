@@ -6,8 +6,8 @@ import (
 	helmtransformer "ocm.software/open-component-model/bindings/go/helm/transformation"
 	helmv1alpha1 "ocm.software/open-component-model/bindings/go/helm/transformation/spec/v1alpha1"
 	ociaccess "ocm.software/open-component-model/bindings/go/oci/spec/access"
-	ociv1alpha1 "ocm.software/open-component-model/bindings/go/oci/spec/transformation/v1alpha1"
-	ocitransformer "ocm.software/open-component-model/bindings/go/oci/transformer"
+	ociv1alpha1 "ocm.software/open-component-model/bindings/go/oci/transformation/spec/v1alpha1"
+	ocitransformation "ocm.software/open-component-model/bindings/go/oci/transformation"
 	"ocm.software/open-component-model/bindings/go/repository"
 	"ocm.software/open-component-model/bindings/go/runtime"
 	"ocm.software/open-component-model/bindings/go/transform/graph/builder"
@@ -26,37 +26,37 @@ func NewDefaultBuilder(
 	transformerScheme.MustRegisterScheme(ociaccess.Scheme)
 	transformerScheme.MustRegisterScheme(helmv1alpha1.Scheme)
 
-	ociGet := &ocitransformer.GetComponentVersion{
+	ociGet := &ocitransformation.GetComponentVersion{
 		Scheme:             transformerScheme,
 		RepoProvider:       repoProvider,
 		CredentialProvider: credentialProvider,
 	}
-	ociAdd := &ocitransformer.AddComponentVersion{
+	ociAdd := &ocitransformation.AddComponentVersion{
 		Scheme:             transformerScheme,
 		RepoProvider:       repoProvider,
 		CredentialProvider: credentialProvider,
 	}
 
 	// Resource transformers
-	ociGetResource := &ocitransformer.GetLocalResource{
+	ociGetResource := &ocitransformation.GetLocalResource{
 		Scheme:             transformerScheme,
 		RepoProvider:       repoProvider,
 		CredentialProvider: credentialProvider,
 	}
-	ociAddResource := &ocitransformer.AddLocalResource{
+	ociAddResource := &ocitransformation.AddLocalResource{
 		Scheme:             transformerScheme,
 		RepoProvider:       repoProvider,
 		CredentialProvider: credentialProvider,
 	}
 
 	// OCI Artifact transformers
-	ociGetOCIArtifact := &ocitransformer.GetOCIArtifact{
+	ociGetOCIArtifact := &ocitransformation.GetOCIArtifact{
 		Scheme:             transformerScheme,
 		Repository:         resourceRepo,
 		CredentialProvider: credentialProvider,
 	}
 
-	ociAddOCIArtifact := &ocitransformer.AddOCIArtifact{
+	ociAddOCIArtifact := &ocitransformation.AddOCIArtifact{
 		Scheme:             transformerScheme,
 		Repository:         resourceRepo,
 		CredentialProvider: credentialProvider,

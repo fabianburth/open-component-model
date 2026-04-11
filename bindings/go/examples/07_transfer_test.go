@@ -28,7 +28,7 @@ import (
 	"ocm.software/open-component-model/bindings/go/oci/repository/resource"
 	ctfrepospec "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/ctf"
 	"ocm.software/open-component-model/bindings/go/runtime"
-	"ocm.software/open-component-model/bindings/go/transfer"
+	"ocm.software/open-component-model/bindings/go/graph/transfer"
 )
 
 // TestExample_TransferCTFtoCTF demonstrates transferring a component version

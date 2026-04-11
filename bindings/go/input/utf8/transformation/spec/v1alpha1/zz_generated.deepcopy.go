@@ -6,7 +6,7 @@
 package v1alpha1
 
 import (
-	constructorv2 "ocm.software/open-component-model/bindings/go/constructor/v1"
+	v1 "ocm.software/open-component-model/bindings/go/constructor/v1"
 	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	runtime "ocm.software/open-component-model/bindings/go/runtime"
 )
@@ -73,7 +73,7 @@ func (in *UTF8InputSpec) DeepCopyInto(out *UTF8InputSpec) {
 	*out = *in
 	if in.Resource != nil {
 		in, out := &in.Resource, &out.Resource
-		*out = new(constructorv2.Resource)
+		*out = new(v1.Resource)
 		(*in).DeepCopyInto(*out)
 	}
 	return

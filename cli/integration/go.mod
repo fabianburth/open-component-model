@@ -171,7 +171,6 @@ require (
 	k8s.io/kubectl v0.35.2 // indirect
 	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2 // indirect
 	ocm.software/open-component-model/bindings/go/cel v0.0.0-20260330094137-cce09ef07431 // indirect
-	ocm.software/open-component-model/bindings/go/constructor v0.0.7 // indirect
 	ocm.software/open-component-model/bindings/go/dag v0.0.6 // indirect
 	ocm.software/open-component-model/bindings/go/helm v0.0.0-20260330094137-cce09ef07431 // indirect
 	ocm.software/open-component-model/bindings/go/input/dir v0.0.2 // indirect
@@ -179,7 +178,6 @@ require (
 	ocm.software/open-component-model/bindings/go/input/utf8 v0.0.0-20260330094137-cce09ef07431 // indirect
 	ocm.software/open-component-model/bindings/go/plugin v0.0.14 // indirect
 	ocm.software/open-component-model/bindings/go/rsa v0.0.0-20260330094137-cce09ef07431 // indirect
-	ocm.software/open-component-model/bindings/go/transfer v0.0.0-20260330094137-cce09ef07431 // indirect
 	ocm.software/open-component-model/bindings/go/transform v0.0.0-20260330094137-cce09ef07431 // indirect
 	sigs.k8s.io/controller-runtime v0.23.1 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect

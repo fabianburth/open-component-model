@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"ocm.software/open-component-model/bindings/go/constructor"
+	constructorruntime "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	inputv1 "ocm.software/open-component-model/bindings/go/plugin/manager/contracts/input/v1"
 	"ocm.software/open-component-model/bindings/go/plugin/manager/registries/plugins"
 	"ocm.software/open-component-model/bindings/go/plugin/manager/types"
@@ -26,8 +26,8 @@ func NewInputRepositoryRegistry(ctx context.Context) *RepositoryRegistry {
 		// Registry contains external plugins ONLY. Internal plugins that already have the implementation are in internalRepositoryPlugins.
 		registry:                               make(map[runtime.Type]types.Plugin),
 		scheme:                                 runtime.NewScheme(runtime.WithAllowUnknown()),
-		internalResourceInputRepositoryPlugins: make(map[runtime.Type]constructor.ResourceInputMethod),
-		internalSourceInputRepositoryPlugins:   make(map[runtime.Type]constructor.SourceInputMethod),
+		internalResourceInputRepositoryPlugins: make(map[runtime.Type]constructorruntime.ResourceInputMethod),
+		internalSourceInputRepositoryPlugins:   make(map[runtime.Type]constructorruntime.SourceInputMethod),
 		constructedPlugins:                     make(map[string]*constructedPlugin),
 	}
 }
@@ -39,8 +39,8 @@ type RepositoryRegistry struct {
 	capabilities                           map[string]inputv1.CapabilitySpec
 	registry                               map[runtime.Type]types.Plugin
 	scheme                                 *runtime.Scheme
-	internalResourceInputRepositoryPlugins map[runtime.Type]constructor.ResourceInputMethod
-	internalSourceInputRepositoryPlugins   map[runtime.Type]constructor.SourceInputMethod
+	internalResourceInputRepositoryPlugins map[runtime.Type]constructorruntime.ResourceInputMethod
+	internalSourceInputRepositoryPlugins   map[runtime.Type]constructorruntime.SourceInputMethod
 	constructedPlugins                     map[string]*constructedPlugin // running plugins
 }
 
@@ -74,7 +74,7 @@ func (r *RepositoryRegistry) AddPlugin(plugin types.Plugin, spec runtime.Typed) 
 }
 
 // GetResourceInputPlugin returns ResourceInput plugins for a specific type.
-func (r *RepositoryRegistry) GetResourceInputPlugin(ctx context.Context, spec runtime.Typed) (constructor.ResourceInputMethod, error) {
+func (r *RepositoryRegistry) GetResourceInputPlugin(ctx context.Context, spec runtime.Typed) (constructorruntime.ResourceInputMethod, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -101,7 +101,7 @@ func (r *RepositoryRegistry) GetResourceInputPlugin(ctx context.Context, spec ru
 }
 
 // GetSourceInputPlugin returns SourceInput plugins for a specific type.
-func (r *RepositoryRegistry) GetSourceInputPlugin(ctx context.Context, spec runtime.Typed) (constructor.SourceInputMethod, error) {
+func (r *RepositoryRegistry) GetSourceInputPlugin(ctx context.Context, spec runtime.Typed) (constructorruntime.SourceInputMethod, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

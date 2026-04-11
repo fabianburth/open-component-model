@@ -16,10 +16,10 @@ includes:
     optional: true
     taskfile: ./bindings/go/credentials/Taskfile.yml
     dir: ./bindings/go/credentials
-  bindings/go/constructor:
+  bindings/go/graph:
     optional: true
-    taskfile: ./bindings/go/constructor/Taskfile.yml
-    dir: ./bindings/go/constructor
+    taskfile: ./bindings/go/graph/Taskfile.yml
+    dir: ./bindings/go/graph
   bindings/go/constructor/v1:
     optional: true
     taskfile: ./bindings/go/constructor/v1/Taskfile.yml
@@ -104,10 +104,6 @@ includes:
     optional: true
     taskfile: ./bindings/go/signing/Taskfile.yml
     dir: ./bindings/go/signing
-  bindings/go/transfer:
-    optional: true
-    taskfile: ./bindings/go/transfer/Taskfile.yml
-    dir: ./bindings/go/transfer
   bindings/go/transfer/integration:
     optional: true
     taskfile: ./bindings/go/transfer/integration/Taskfile.yml

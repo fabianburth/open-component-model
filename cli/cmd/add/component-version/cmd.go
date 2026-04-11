@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
 
-	"ocm.software/open-component-model/bindings/go/constructor"
+	"ocm.software/open-component-model/bindings/go/graph/construct"
 	constructorruntime "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/v1"
 	"ocm.software/open-component-model/bindings/go/oci/compref"
@@ -67,14 +67,14 @@ const (
 	ExternalComponentVersionCopyPolicySkip       ExternalComponentVersionCopyPolicy = "skip"
 )
 
-func (p ExternalComponentVersionCopyPolicy) ToConstructorPolicy() constructor.ExternalComponentVersionCopyPolicy {
+func (p ExternalComponentVersionCopyPolicy) ToConstructorPolicy() construct.ExternalComponentVersionCopyPolicy {
 	switch p {
 	case ExternalComponentVersionCopyPolicyCopyOrFail:
-		return constructor.ExternalComponentVersionCopyPolicyCopyOrFail
+		return construct.ExternalComponentVersionCopyPolicyCopyOrFail
 	case ExternalComponentVersionCopyPolicySkip:
-		return constructor.ExternalComponentVersionCopyPolicySkip
+		return construct.ExternalComponentVersionCopyPolicySkip
 	default:
-		return constructor.ExternalComponentVersionCopyPolicySkip
+		return construct.ExternalComponentVersionCopyPolicySkip
 	}
 }
 
@@ -85,14 +85,14 @@ func ExternalComponentVersionCopyPolicies() []string {
 	}
 }
 
-func (p ComponentVersionConflictPolicy) ToConstructorConflictPolicy() constructor.ComponentVersionConflictPolicy {
+func (p ComponentVersionConflictPolicy) ToConstructorConflictPolicy() construct.ComponentVersionConflictPolicy {
 	switch p {
 	case ComponentVersionConflictPolicyReplace:
-		return constructor.ComponentVersionConflictReplace
+		return construct.ComponentVersionConflictReplace
 	case ComponentVersionConflictPolicySkip:
-		return constructor.ComponentVersionConflictSkip
+		return construct.ComponentVersionConflictSkip
 	default:
-		return constructor.ComponentVersionConflictAbortAndFail
+		return construct.ComponentVersionConflictAbortAndFail
 	}
 }
 
@@ -338,7 +338,7 @@ func AddComponentVersion(cmd *cobra.Command, _ []string) error {
 	// when the policy requires it. This must happen before building the graph
 	// because the graph builder doesn't have repository access.
 	conflictPolicy := ComponentVersionConflictPolicy(cvConflictPolicy).ToConstructorConflictPolicy()
-	if conflictPolicy != constructor.ComponentVersionConflictReplace {
+	if conflictPolicy != construct.ComponentVersionConflictReplace {
 		var kept []constructorruntime.Component
 		for i := range constructorSpec.Components {
 			comp := &constructorSpec.Components[i]
@@ -356,7 +356,7 @@ func AddComponentVersion(cmd *cobra.Command, _ []string) error {
 			_, err = repo.GetComponentVersion(ctx, comp.Name, comp.Version)
 			if err == nil {
 				// Component version exists
-				if conflictPolicy == constructor.ComponentVersionConflictAbortAndFail {
+				if conflictPolicy == construct.ComponentVersionConflictAbortAndFail {
 					return fmt.Errorf("component version %q already exists in target repository",
 						comp.ToIdentity())
 				}
@@ -371,13 +371,13 @@ func AddComponentVersion(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Build transformation graph definition
-	tgd, err := constructor.BuildGraphDefinition(ctx, constructorSpec,
-		constructor.WithTargetRepository(repoSpec),
-		constructor.WithWorkingDirectory(workingDir),
-		constructor.WithExternalComponentRepository(&externalRepoProvider{resolver: repoResolver}),
-		constructor.WithConflictPolicy(ComponentVersionConflictPolicy(cvConflictPolicy).ToConstructorConflictPolicy()),
-		constructor.WithExternalCopyPolicy(ExternalComponentVersionCopyPolicy(evCopyPolicy).ToConstructorPolicy()),
-		constructor.WithSkipDigestProcessing(skipReferenceDigestProcessing),
+	tgd, err := construct.BuildGraphDefinition(ctx, constructorSpec,
+		construct.WithTargetRepository(repoSpec),
+		construct.WithWorkingDirectory(workingDir),
+		construct.WithExternalComponentRepository(&externalRepoProvider{resolver: repoResolver}),
+		construct.WithConflictPolicy(ComponentVersionConflictPolicy(cvConflictPolicy).ToConstructorConflictPolicy()),
+		construct.WithExternalCopyPolicy(ExternalComponentVersionCopyPolicy(evCopyPolicy).ToConstructorPolicy()),
+		construct.WithSkipDigestProcessing(skipReferenceDigestProcessing),
 	)
 	if err != nil {
 		return fmt.Errorf("building graph definition failed: %w", err)
@@ -388,7 +388,7 @@ func AddComponentVersion(cmd *cobra.Command, _ []string) error {
 	if !skipReferenceDigestProcessing {
 		digestProcessor = ocires.NewResourceRepository(octx.FilesystemConfig())
 	}
-	b := constructor.NewDefaultBuilder(pm.ComponentVersionRepositoryRegistry, credGraph, digestProcessor)
+	b := construct.NewDefaultBuilder(pm.ComponentVersionRepositoryRegistry, credGraph, digestProcessor)
 	graph, err := b.
 		WithEvents(make(chan graphRuntime.ProgressEvent, eventBufferSize)).
 		BuildAndCheck(tgd)

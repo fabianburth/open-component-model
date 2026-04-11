@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"ocm.software/open-component-model/bindings/go/constructor"
 	constructorruntime "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	descriptorruntime "ocm.software/open-component-model/bindings/go/descriptor/runtime"
 	v1 "ocm.software/open-component-model/bindings/go/plugin/manager/contracts/input/v1"
@@ -12,7 +11,7 @@ import (
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 
-var _ constructor.ResourceInputMethod = (*resourceInputPluginConverter)(nil)
+var _ constructorruntime.ResourceInputMethod = (*resourceInputPluginConverter)(nil)
 
 type resourceInputPluginConverter struct {
 	externalPlugin v1.ResourceInputPluginContract
@@ -35,7 +34,7 @@ func (r *resourceInputPluginConverter) GetResourceCredentialConsumerIdentity(ctx
 	return result.Identity, nil
 }
 
-func (r *resourceInputPluginConverter) ProcessResource(ctx context.Context, resource *constructorruntime.Resource, credentials map[string]string) (*constructor.ResourceInputMethodResult, error) {
+func (r *resourceInputPluginConverter) ProcessResource(ctx context.Context, resource *constructorruntime.Resource, credentials map[string]string) (*constructorruntime.ResourceInputMethodResult, error) {
 	convert, err := constructorruntime.ConvertToV1Resource(resource)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert resource: %w", err)
@@ -56,7 +55,7 @@ func (r *resourceInputPluginConverter) ProcessResource(ctx context.Context, reso
 	// Convert descriptor resource to constructor runtime resource
 	converted := constructorruntime.ConvertFromDescriptorResource(descriptorruntime.ConvertFromV2Resource(result.Resource))
 	descResource := constructorruntime.ConvertToDescriptorResource(converted)
-	resourceInputMethodResult := &constructor.ResourceInputMethodResult{
+	resourceInputMethodResult := &constructorruntime.ResourceInputMethodResult{
 		ProcessedResource: descResource,
 		ProcessedBlobData: rBlob,
 	}

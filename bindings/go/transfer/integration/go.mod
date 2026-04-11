@@ -17,7 +17,6 @@ require (
 	ocm.software/open-component-model/bindings/go/oci v0.0.37
 	ocm.software/open-component-model/bindings/go/repository v0.0.8
 	ocm.software/open-component-model/bindings/go/runtime v0.0.7
-	ocm.software/open-component-model/bindings/go/transfer v0.0.0-20260330094137-cce09ef07431
 	oras.land/oras-go/v2 v2.6.0
 )
 
@@ -170,4 +169,3 @@ require (
 )
 
 // Replace to test against current local code
-replace ocm.software/open-component-model/bindings/go/transfer => ../

@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"ocm.software/open-component-model/bindings/go/blob"
-	"ocm.software/open-component-model/bindings/go/constructor"
+	constructorruntime "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/v1"
 	helmv1 "ocm.software/open-component-model/bindings/go/helm/input/spec/v1"
 	v1 "ocm.software/open-component-model/bindings/go/plugin/manager/contracts/input/v1"
@@ -304,7 +304,7 @@ func (m *mockBlobWithoutMediaType) Size() int64 {
 func TestProcessHelmResourceWithMediaTypeAware(t *testing.T) {
 	// Create a mock result with MediaTypeAware blob
 	testMediaType := "application/vnd.oci.image.layout.v1+tar+gzip"
-	mockResult := &constructor.ResourceInputMethodResult{
+	mockResult := &constructorruntime.ResourceInputMethodResult{
 		ProcessedBlobData: &mockMediaTypeAwareBlob{
 			mediaType: testMediaType,
 			known:     true,
@@ -325,7 +325,7 @@ func TestProcessHelmResourceWithMediaTypeAware(t *testing.T) {
 // TestProcessHelmResourceWithUnknownMediaType tests behavior when MediaTypeAware returns unknown=false
 func TestProcessHelmResourceWithUnknownMediaType(t *testing.T) {
 	// Create a mock result with MediaTypeAware blob that has unknown media type
-	mockResult := &constructor.ResourceInputMethodResult{
+	mockResult := &constructorruntime.ResourceInputMethodResult{
 		ProcessedBlobData: &mockMediaTypeAwareBlob{
 			mediaType: "some-type",
 			known:     false, // media type is not known
@@ -346,7 +346,7 @@ func TestProcessHelmResourceWithUnknownMediaType(t *testing.T) {
 // TestProcessHelmResourceWithEmptyMediaType tests behavior when MediaTypeAware returns empty string
 func TestProcessHelmResourceWithEmptyMediaType(t *testing.T) {
 	// Create a mock result with MediaTypeAware blob that has empty media type
-	mockResult := &constructor.ResourceInputMethodResult{
+	mockResult := &constructorruntime.ResourceInputMethodResult{
 		ProcessedBlobData: &mockMediaTypeAwareBlob{
 			mediaType: "", // empty media type
 			known:     true,
@@ -367,7 +367,7 @@ func TestProcessHelmResourceWithEmptyMediaType(t *testing.T) {
 // TestProcessHelmResourceWithoutMediaTypeAware tests fallback when blob doesn't implement MediaTypeAware
 func TestProcessHelmResourceWithoutMediaTypeAware(t *testing.T) {
 	// Create a mock result with blob that doesn't implement MediaTypeAware
-	mockResult := &constructor.ResourceInputMethodResult{
+	mockResult := &constructorruntime.ResourceInputMethodResult{
 		ProcessedBlobData: &mockBlobWithoutMediaType{},
 	}
 

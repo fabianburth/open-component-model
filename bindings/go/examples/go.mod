@@ -19,7 +19,6 @@ require (
 	ocm.software/open-component-model/bindings/go/rsa v0.0.0-20260324103707-0367c224baf3
 	ocm.software/open-component-model/bindings/go/runtime v0.0.7
 	ocm.software/open-component-model/bindings/go/signing v0.0.0-20260326091035-ef0ea1b8f695
-	ocm.software/open-component-model/bindings/go/transfer v0.0.0-20260326100711-8cef52a35973
 	oras.land/oras-go/v2 v2.6.0
 )
 

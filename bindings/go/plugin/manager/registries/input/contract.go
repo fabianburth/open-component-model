@@ -1,7 +1,7 @@
 package input
 
 import (
-	"ocm.software/open-component-model/bindings/go/constructor"
+	constructorruntime "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 
@@ -12,7 +12,7 @@ import (
 // plugins are not compiled in, they cannot have a scheme and therefore, cannot
 // implement this interface.
 type BuiltinResourceInputMethod interface {
-	constructor.ResourceInputMethod
+	constructorruntime.ResourceInputMethod
 	GetInputMethodScheme() *runtime.Scheme
 }
 
@@ -23,6 +23,6 @@ type BuiltinResourceInputMethod interface {
 // plugins are not compiled in, they cannot have a scheme and therefore, cannot
 // implement this interface.
 type BuiltinSourceInputMethod interface {
-	constructor.SourceInputMethod
+	constructorruntime.SourceInputMethod
 	GetInputMethodScheme() *runtime.Scheme
 }

@@ -7,6 +7,7 @@ package v1alpha1
 
 import (
 	v1 "ocm.software/open-component-model/bindings/go/constructor/spec/v1"
+	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	runtime "ocm.software/open-component-model/bindings/go/runtime"
 )
 
@@ -51,7 +52,7 @@ func (in *UTF8InputOutput) DeepCopyInto(out *UTF8InputOutput) {
 	out.File = in.File
 	if in.Resource != nil {
 		in, out := &in.Resource, &out.Resource
-		*out = new(v1.Resource)
+		*out = new(v2.Resource)
 		(*in).DeepCopyInto(*out)
 	}
 	return

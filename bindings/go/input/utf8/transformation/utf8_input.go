@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"ocm.software/open-component-model/bindings/go/blob/filesystem"
+	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/spec/v1"
 	utf8pkg "ocm.software/open-component-model/bindings/go/input/utf8"
 	v1 "ocm.software/open-component-model/bindings/go/input/utf8/spec/v1"
 	"ocm.software/open-component-model/bindings/go/input/utf8/transformation/spec/v1alpha1"
@@ -62,7 +63,7 @@ func (t *UTF8Input) Transform(ctx context.Context, step runtime.Typed) (runtime.
 		transformation.Output = &v1alpha1.UTF8InputOutput{}
 	}
 	transformation.Output.File = *fileSpec
-	transformation.Output.Resource = spec.Resource
+	transformation.Output.Resource = constructorv1.ConvertResourceToV2(spec.Resource)
 
 	return &transformation, nil
 }

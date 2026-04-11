@@ -10,6 +10,7 @@ import (
 	"ocm.software/open-component-model/bindings/go/blob/filesystem"
 	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/spec/v1"
 	"ocm.software/open-component-model/bindings/go/credentials"
+	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	helminput "ocm.software/open-component-model/bindings/go/helm/input"
 	helmv1 "ocm.software/open-component-model/bindings/go/helm/input/spec/v1"
 	"ocm.software/open-component-model/bindings/go/helm/input/transformation/spec/v1alpha1"
@@ -94,7 +95,7 @@ func (t *HelmInput) Transform(ctx context.Context, step runtime.Typed) (runtime.
 		transformation.Output = &v1alpha1.HelmInputOutput{}
 	}
 	transformation.Output.File = *fileSpec
-	transformation.Output.Resource = spec.Resource
+	transformation.Output.Resource = constructorv1.ConvertResourceToV2(spec.Resource)
 
 	// If Repository is set, create a resource access pointing to the remote helm chart
 	if v1Helm.Repository != "" {
@@ -108,8 +109,8 @@ func (t *HelmInput) Transform(ctx context.Context, step runtime.Typed) (runtime.
 	return &transformation, nil
 }
 
-// createRemoteResource creates a constructorv1.Resource with OCI access for a helm chart stored in a remote repository.
-func createRemoteResource(chart *helminput.ReadOnlyChart, repository string) (*constructorv1.Resource, error) {
+// createRemoteResource creates a v2.Resource with OCI access for a helm chart stored in a remote repository.
+func createRemoteResource(chart *helminput.ReadOnlyChart, repository string) (*v2.Resource, error) {
 	ref, err := looseref.ParseReference(repository)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse target access image reference %q: %w", repository, err)
@@ -139,17 +140,15 @@ func createRemoteResource(chart *helminput.ReadOnlyChart, repository string) (*c
 		return nil, fmt.Errorf("error converting OCIImage access to raw: %w", err)
 	}
 
-	return &constructorv1.Resource{
-		ElementMeta: constructorv1.ElementMeta{
-			ObjectMeta: constructorv1.ObjectMeta{
+	return &v2.Resource{
+		ElementMeta: v2.ElementMeta{
+			ObjectMeta: v2.ObjectMeta{
 				Name:    chart.Name,
 				Version: chart.Version,
 			},
 		},
 		Type:     helminput.HelmRepositoryType,
-		Relation: constructorv1.ExternalRelation,
-		AccessOrInput: constructorv1.AccessOrInput{
-			Access: &rawAccess,
-		},
+		Relation: v2.ExternalRelation,
+		Access:   &rawAccess,
 	}, nil
 }

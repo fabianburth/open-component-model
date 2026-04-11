@@ -3,6 +3,7 @@ package v1alpha1
 import (
 	"ocm.software/open-component-model/bindings/go/blob/filesystem/spec/access/v1alpha1"
 	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/spec/v1"
+	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 
@@ -28,8 +29,8 @@ type FileInput struct {
 type FileInputOutput struct {
 	// File is the file access specification for the produced blob.
 	File v1alpha1.File `json:"file"`
-	// Resource is the resource descriptor this input belongs to.
-	Resource *constructorv1.Resource `json:"resource,omitempty"`
+	// Resource is the v2-compatible resource descriptor produced by the transformation.
+	Resource *v2.Resource `json:"resource,omitempty"`
 }
 
 // FileInputSpec is the input specification for the FileInput transformation.

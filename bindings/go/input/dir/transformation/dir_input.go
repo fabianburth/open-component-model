@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"ocm.software/open-component-model/bindings/go/blob/filesystem"
+	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/spec/v1"
 	dir "ocm.software/open-component-model/bindings/go/input/dir"
 	dirv1 "ocm.software/open-component-model/bindings/go/input/dir/spec/v1"
 	"ocm.software/open-component-model/bindings/go/input/dir/transformation/spec/v1alpha1"
@@ -75,7 +76,7 @@ func (t *DirInput) Transform(ctx context.Context, step runtime.Typed) (runtime.T
 		transformation.Output = &v1alpha1.DirInputOutput{}
 	}
 	transformation.Output.File = *fileSpec
-	transformation.Output.Resource = spec.Resource
+	transformation.Output.Resource = constructorv1.ConvertResourceToV2(spec.Resource)
 
 	return &transformation, nil
 }

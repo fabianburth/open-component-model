@@ -1,4 +1,4 @@
-package transformer
+package transformation
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 
 	"github.com/opencontainers/go-digest"
 
-	"ocm.software/open-component-model/bindings/go/graph/spec/transformation/v1alpha1"
+	"ocm.software/open-component-model/bindings/go/signing/transformation/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/descriptor/normalisation"
 	"ocm.software/open-component-model/bindings/go/descriptor/normalisation/json/v4alpha1"
 	descruntime "ocm.software/open-component-model/bindings/go/descriptor/runtime"

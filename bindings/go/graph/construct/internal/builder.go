@@ -1,8 +1,8 @@
 package internal
 
 import (
-	constructorv1alpha1 "ocm.software/open-component-model/bindings/go/graph/spec/transformation/v1alpha1"
-	constructortransformer "ocm.software/open-component-model/bindings/go/graph/transformer"
+	signingv1alpha1 "ocm.software/open-component-model/bindings/go/signing/transformation/spec/v1alpha1"
+	signingtransformation "ocm.software/open-component-model/bindings/go/signing/transformation"
 	"ocm.software/open-component-model/bindings/go/credentials"
 	helmtransformation "ocm.software/open-component-model/bindings/go/helm/input/transformation"
 	helmv1alpha1 "ocm.software/open-component-model/bindings/go/helm/input/transformation/spec/v1alpha1"
@@ -34,7 +34,7 @@ func NewDefaultBuilder(
 	transformerScheme.MustRegisterScheme(utf8v1alpha1.Scheme)
 	transformerScheme.MustRegisterScheme(dirv1alpha1.Scheme)
 	transformerScheme.MustRegisterScheme(helmv1alpha1.Scheme)
-	transformerScheme.MustRegisterScheme(constructorv1alpha1.Scheme)
+	transformerScheme.MustRegisterScheme(signingv1alpha1.Scheme)
 
 	// OCI/CTF component version transformers
 	ociAdd := &ocitransformer.AddComponentVersion{
@@ -74,7 +74,7 @@ func NewDefaultBuilder(
 	}
 
 	// Constructor-specific transformers
-	computeDigest := &constructortransformer.ComputeComponentDigest{Scheme: transformerScheme}
+	computeDigest := &signingtransformation.ComputeComponentDigest{Scheme: transformerScheme}
 
 	b := builder.NewBuilder(transformerScheme).
 		// OCI/CTF component version operations
@@ -94,7 +94,7 @@ func NewDefaultBuilder(
 		WithTransformer(&dirv1alpha1.DirInput{}, dirInput).
 		WithTransformer(&helmv1alpha1.HelmInput{}, helmInput).
 		// Constructor-specific transformers
-		WithTransformer(&constructorv1alpha1.ComputeComponentDigest{}, computeDigest)
+		WithTransformer(&signingv1alpha1.ComputeComponentDigest{}, computeDigest)
 
 	// Resource digest processing (optional — only when a processor is provided)
 	if digestProcessor != nil {

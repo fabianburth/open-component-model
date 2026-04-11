@@ -9,7 +9,7 @@ import (
 
 	"ocm.software/open-component-model/bindings/go/blob"
 	constructor "ocm.software/open-component-model/bindings/go/constructor/runtime"
-	constructorv1alpha1 "ocm.software/open-component-model/bindings/go/graph/spec/transformation/v1alpha1"
+	signingv1alpha1 "ocm.software/open-component-model/bindings/go/signing/transformation/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/dag"
 	syncdag "ocm.software/open-component-model/bindings/go/dag/sync"
 	descruntime "ocm.software/open-component-model/bindings/go/descriptor/runtime"
@@ -397,7 +397,7 @@ func addComputeDigestTransformation(baseID string, hasUpload bool, descMap map[s
 
 	digestTransform := transformv1alpha1.GenericTransformation{
 		TransformationMeta: meta.TransformationMeta{
-			Type: constructorv1alpha1.ComputeComponentDigestV1alpha1,
+			Type: signingv1alpha1.ComputeComponentDigestV1alpha1,
 			ID:   digestID,
 		},
 		Spec: &runtime.Unstructured{Data: specData},

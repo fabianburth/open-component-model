@@ -1,4 +1,4 @@
-package transformer_test
+package transformation_test
 
 import (
 	"context"
@@ -8,8 +8,8 @@ import (
 	"github.com/opencontainers/go-digest"
 	"github.com/stretchr/testify/require"
 
-	"ocm.software/open-component-model/bindings/go/graph/spec/transformation/v1alpha1"
-	"ocm.software/open-component-model/bindings/go/graph/transformer"
+	"ocm.software/open-component-model/bindings/go/signing/transformation/spec/v1alpha1"
+	signingtransformation "ocm.software/open-component-model/bindings/go/signing/transformation"
 	"ocm.software/open-component-model/bindings/go/descriptor/normalisation"
 	"ocm.software/open-component-model/bindings/go/descriptor/normalisation/json/v4alpha1"
 	descruntime "ocm.software/open-component-model/bindings/go/descriptor/runtime"
@@ -45,7 +45,7 @@ func TestComputeComponentDigest_Transform(t *testing.T) {
 		},
 	}
 
-	xformer := &transformer.ComputeComponentDigest{Scheme: scheme}
+	xformer := &signingtransformation.ComputeComponentDigest{Scheme: scheme}
 
 	step := &v1alpha1.ComputeComponentDigest{
 		Type: v1alpha1.ComputeComponentDigestV1alpha1,
@@ -79,7 +79,7 @@ func TestComputeComponentDigest_Transform_MissingSpec(t *testing.T) {
 	ctx := context.Background()
 	scheme := newScheme()
 
-	xformer := &transformer.ComputeComponentDigest{Scheme: scheme}
+	xformer := &signingtransformation.ComputeComponentDigest{Scheme: scheme}
 
 	step := &v1alpha1.ComputeComponentDigest{
 		Type: v1alpha1.ComputeComponentDigestV1alpha1,
@@ -96,7 +96,7 @@ func TestComputeComponentDigest_Transform_MissingDescriptor(t *testing.T) {
 	ctx := context.Background()
 	scheme := newScheme()
 
-	xformer := &transformer.ComputeComponentDigest{Scheme: scheme}
+	xformer := &signingtransformation.ComputeComponentDigest{Scheme: scheme}
 
 	step := &v1alpha1.ComputeComponentDigest{
 		Type: v1alpha1.ComputeComponentDigestV1alpha1,
@@ -131,7 +131,7 @@ func TestComputeComponentDigest_Transform_Deterministic(t *testing.T) {
 		},
 	}
 
-	xformer := &transformer.ComputeComponentDigest{Scheme: scheme}
+	xformer := &signingtransformation.ComputeComponentDigest{Scheme: scheme}
 
 	step := &v1alpha1.ComputeComponentDigest{
 		Type: v1alpha1.ComputeComponentDigestV1alpha1,

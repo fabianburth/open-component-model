@@ -589,4 +589,55 @@ Operates on code already in `graph/construct` and `graph/transfer`.
 | # | Issue | Action | Effort |
 |---|-------|--------|--------|
 | 11 | M-3 | Digest processing in transfer (Strategy 6) | Large |
-| 12 | TODO | By-value resource processing in constructor (`input.go:119`) | Large |
+| 12 | TODO | By-value resource processing in construct (`graph/construct/internal/input.go`) | Large |
+
+---
+
+## Implementation Status
+
+The following items have been implemented. Paths reflect the new module structure.
+
+### Completed
+
+| Item | Commit | Description |
+|------|--------|-------------|
+| C-1 | `a6e13c8f5` | Fixed source CEL reference bug in `graph/construct/internal/source.go` |
+| C-6 | `a53cabb40` | Removed local AddLocalSource type constant workaround |
+| C-2, C-3, C-4 | `9e4f5523a` | Deduplicated shared helpers into `graph/internal/helpers.go` |
+| C-5 | `040c727d5` | Deleted `addDescriptorToEnvironment` (inlined static data) |
+| M-1, M-2 | `040c727d5` | Eliminated environment usage — no more v1/v2 format divergence |
+| M-4 | `e6526062a` | Construct now uses `ComponentVersionRepositoryResolver` |
+| A-1 | `ef3c3c4f0` | Restored `InputMethod` implementations in all input packages |
+| A-2 | `089ee5268`, `b031d967e`, `672aea7d5` | Restructured constructor modules + created `graph/` module |
+| L-8 | `c6c72e941` | Aligned OCI transformer layout to `transformation/spec` pattern |
+| Extra | `34fde9e60` | Moved `ComputeComponentDigest` to `signing/transformation/` |
+| Extra | `a74feb9c2` | Moved transfer integration tests to `graph/transfer/integration/` |
+
+### New module layout
+
+```
+bindings/go/
+├── constructor/                ← domain model only (mirrors descriptor/)
+│   ├── v1/        (module)     ← serialization format
+│   └── runtime/   (module)     ← runtime types + library interfaces
+├── graph/         (module)     ← graph generation (merged construct + transfer)
+│   ├── construct/              ← BuildGraphDefinition for component construction
+│   ├── transfer/               ← BuildGraphDefinition for component transfer
+│   │   └── integration/        ← transfer integration tests
+│   ├── internal/               ← shared helpers (identityToTransformationID, etc.)
+│   └── ...
+├── signing/                    ← signing + digest computation
+│   └── transformation/         ← ComputeComponentDigest transformer + spec
+├── oci/
+│   └── transformation/         ← OCI/CTF transformers + spec (aligned layout)
+├── transform/     (module)     ← shared graph engine (CEL, DAG, builder)
+├── repository/    (module)     ← access-type library abstractions
+├── ...
+```
+
+### Remaining
+
+| Item | Description |
+|------|-------------|
+| M-3 | Add `ComputeComponentDigest` nodes in transfer graph generation for referenced components |
+| TODO | Implement by-value resource processing in construct (Get+Add chains for `CopyPolicy: byValue`) |

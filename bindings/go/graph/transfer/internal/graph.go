@@ -149,14 +149,14 @@ func BuildGraphDefinition(
 // and generates transformation nodes for each (component, target) pair.
 //
 // For each component:
-//  1. The descriptor is converted to v2 format and added to the graph environment.
+//  1. The descriptor is converted to v2 format and marshalled to a map for inlining.
 //  2. For each assigned target, resource transformations (get/add pairs) are created based
 //     on the resource access type (local blob, OCI artifact, Helm chart) and the copy mode.
 //  3. A final AddComponentVersion upload transformation is appended, referencing the processed
 //     resources via CEL expressions.
 //
 // When a component has multiple targets, transformation IDs are suffixed (e.g., "T0", "T1")
-// to ensure uniqueness in the DAG. The environment descriptor is shared across targets
+// to ensure uniqueness in the DAG. The descriptor map is shared across targets
 // since it's source-side data.
 func fillGraphDefinitionWithPrefetchedComponents(
 	ctx context.Context,
@@ -184,7 +184,8 @@ func fillGraphDefinitionWithPrefetchedComponents(
 			return fmt.Errorf("cannot convert to v2: %w", err)
 		}
 
-		if err := addDescriptorToEnvironment(v2desc, baseID, tgd); err != nil {
+		descMap, err := descriptorToMap(v2desc)
+		if err != nil {
 			return err
 		}
 
@@ -210,7 +211,7 @@ func fillGraphDefinitionWithPrefetchedComponents(
 				return err
 			}
 
-			if err := addUploadTransformation(v2desc, id, baseID, target, tgd, resourceTransformIDs); err != nil {
+			if err := addUploadTransformation(descMap, id, target, tgd, resourceTransformIDs); err != nil {
 				return err
 			}
 		}
@@ -291,25 +292,10 @@ func processResource(resource descriptorv2.Resource, access runtime.Typed, id st
 	return nil
 }
 
-// addDescriptorToEnvironment marshals the v2 descriptor and adds it to the graph environment.
-func addDescriptorToEnvironment(v2desc *descriptorv2.Descriptor, id string, tgd *transformv1alpha1.TransformationGraphDefinition) error {
-	rawV2Desc, err := json.Marshal(v2desc)
-	if err != nil {
-		return fmt.Errorf("cannot marshal v2 descriptor: %w", err)
-	}
-	mapDesc := make(map[string]any)
-	if err := json.Unmarshal(rawV2Desc, &mapDesc); err != nil {
-		return fmt.Errorf("cannot unmarshal v2 descriptor: %w", err)
-	}
-	tgd.Environment.Data[id] = mapDesc
-	return nil
-}
-
 // addUploadTransformation creates the final upload (AddComponentVersion) transformation
 // for a component, reconstructing the descriptor with CEL references to modified resources.
-// envID is the base ID used to reference the descriptor in the environment (without target suffix).
-func addUploadTransformation(v2desc *descriptorv2.Descriptor, id string, envID string, toSpec runtime.Typed, tgd *transformv1alpha1.TransformationGraphDefinition, resourceTransformIDs map[int]string) error {
-	descriptorSpec := buildDescriptorSpec(v2desc, envID, resourceTransformIDs)
+func addUploadTransformation(descMap map[string]any, id string, toSpec runtime.Typed, tgd *transformv1alpha1.TransformationGraphDefinition, resourceTransformIDs map[int]string) error {
+	descriptorSpec := buildInlineDescriptorSpec(descMap, resourceTransformIDs)
 
 	addType, err := chooseAddType(toSpec)
 	if err != nil {
@@ -336,54 +322,35 @@ func addUploadTransformation(v2desc *descriptorv2.Descriptor, id string, envID s
 	return nil
 }
 
-// buildDescriptorSpec constructs the descriptor specification for the upload transformation.
-// If no resources were modified (no resource transformations), it returns a CEL reference to
-// the original descriptor in the environment. Otherwise, it builds a composite descriptor where
-// each modified resource is referenced via its Add transformation's output, and unmodified
-// resources reference the original environment data.
-func buildDescriptorSpec(v2desc *descriptorv2.Descriptor, id string, resourceTransformIDs map[int]string) any {
-	if len(resourceTransformIDs) == 0 {
-		return fmt.Sprintf("${environment.%s}", id)
+// descriptorToMap marshals a v2 descriptor to map[string]any.
+func descriptorToMap(v2desc *descriptorv2.Descriptor) (map[string]any, error) {
+	rawV2Desc, err := json.Marshal(v2desc)
+	if err != nil {
+		return nil, fmt.Errorf("cannot marshal v2 descriptor: %w", err)
 	}
-
-	resourcesArray := make([]any, len(v2desc.Component.Resources))
-	for i := range v2desc.Component.Resources {
-		if addID, ok := resourceTransformIDs[i]; ok {
-			resourcesArray[i] = fmt.Sprintf("${%s.output.resource}", addID)
-		} else {
-			resourcesArray[i] = fmt.Sprintf("${environment.%s.component.resources[%d]}", id, i)
-		}
+	mapDesc := make(map[string]any)
+	if err := json.Unmarshal(rawV2Desc, &mapDesc); err != nil {
+		return nil, fmt.Errorf("cannot unmarshal v2 descriptor: %w", err)
 	}
-
-	componentMap := map[string]any{
-		"name":      fmt.Sprintf("${environment.%s.component.name}", id),
-		"version":   fmt.Sprintf("${environment.%s.component.version}", id),
-		"provider":  fmt.Sprintf("${environment.%s.component.provider}", id),
-		"resources": resourcesArray,
-	}
-
-	setOptionalField(componentMap, "repositoryContexts", id, v2desc.Component.RepositoryContexts != nil)
-	setOptionalField(componentMap, "sources", id, v2desc.Component.Sources != nil)
-	setOptionalField(componentMap, "componentReferences", id, v2desc.Component.References != nil)
-
-	descSpecMap := map[string]any{
-		"meta":      fmt.Sprintf("${environment.%s.meta}", id),
-		"component": componentMap,
-	}
-
-	if v2desc.Signatures != nil {
-		descSpecMap["signatures"] = fmt.Sprintf("${environment.%s.signatures}", id)
-	}
-
-	return descSpecMap
+	return mapDesc, nil
 }
 
-// setOptionalField sets a field in the component map, either as a CEL reference to the
-// environment value if present, or nil if absent.
-func setOptionalField(componentMap map[string]any, field, id string, present bool) {
-	if present {
-		componentMap[field] = fmt.Sprintf("${environment.%s.component.%s}", id, field)
-	} else {
-		componentMap[field] = nil
+// buildInlineDescriptorSpec returns the descriptor map with modified resources replaced
+// by CEL references to their Add transformation outputs.
+func buildInlineDescriptorSpec(descMap map[string]any, resourceTransformIDs map[int]string) map[string]any {
+	if len(resourceTransformIDs) == 0 {
+		return descMap
 	}
+
+	// Deep-copy the map so we don't mutate the caller's data.
+	raw, _ := json.Marshal(descMap)
+	result := make(map[string]any)
+	_ = json.Unmarshal(raw, &result)
+
+	component, _ := result["component"].(map[string]any)
+	resources, _ := component["resources"].([]any)
+	for i, addID := range resourceTransformIDs {
+		resources[i] = fmt.Sprintf("${%s.output.resource}", addID)
+	}
+	return result
 }

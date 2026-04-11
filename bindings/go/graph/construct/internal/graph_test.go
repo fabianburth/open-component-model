@@ -111,32 +111,23 @@ func TestBuildGraphDefinition_SimpleComponent(t *testing.T) {
 	r.Contains(types, "OCIAddLocalResource/v1alpha1")
 	r.Contains(types, "OCIAddComponentVersion/v1alpha1")
 
-	// Verify environment has the component in constructor format (not descriptor format)
-	r.NotEmpty(tgd.Environment.Data)
-	envData, ok := tgd.Environment.Data["constructExampleComMyComponent100"].(map[string]any)
-	r.True(ok, "environment should contain constructor component data")
+	// Environment should be empty — all data is now inlined in transformation specs.
+	r.Empty(tgd.Environment.Data)
 
-	// Constructor format: fields at top level (not nested under "component")
-	r.Equal("example.com/my-component", envData["name"])
-	r.Equal("1.0.0", envData["version"])
+	// Verify the upload transformation has an inline v2 descriptor.
+	for _, t := range tgd.Transformations {
+		if t.Type.String() == "OCIAddComponentVersion/v1alpha1" {
+			desc, ok := t.Spec.Data["descriptor"].(map[string]any)
+			r.True(ok, "descriptor should be an inline map")
 
-	// Provider should be an object with "name", not a plain string
-	provider, ok := envData["provider"].(map[string]any)
-	r.True(ok, "provider should be an object")
-	r.Equal("test-provider", provider["name"])
-
-	// No "meta" or "component" wrapper — these are v2 descriptor artifacts
-	r.Nil(envData["meta"], "constructor format should not have meta")
-	r.Nil(envData["component"], "constructor format should not have component wrapper")
-
-	// Environment stores the constructor's v1 representation, which preserves input specs.
-	resources, ok := envData["resources"].([]any)
-	r.True(ok, "resources should be an array")
-	r.Len(resources, 1)
-	res, ok := resources[0].(map[string]any)
-	r.True(ok)
-	r.NotNil(res["input"], "resource should preserve input spec in environment")
-	r.Nil(res["access"], "resource with input should not have access in environment")
+			// v2 format: wrapped under meta + component
+			r.NotNil(desc["meta"], "v2 descriptor should have meta")
+			comp, ok := desc["component"].(map[string]any)
+			r.True(ok, "v2 descriptor should have component wrapper")
+			r.Equal("example.com/my-component", comp["name"])
+			r.Equal("1.0.0", comp["version"])
+		}
+	}
 }
 
 func TestBuildGraphDefinition_ComponentWithSource(t *testing.T) {
@@ -331,8 +322,8 @@ func TestBuildGraphDefinition_ComponentWithReference(t *testing.T) {
 	}
 	r.NotNil(compBUpload, "should find comp-b upload with componentReferences")
 
-	// Verify environment has both descriptors
-	r.Len(tgd.Environment.Data, 2)
+	// Environment should be empty — all data is now inlined.
+	r.Empty(tgd.Environment.Data)
 }
 
 func TestBuildGraphDefinition_ExternalComponentSkip(t *testing.T) {
@@ -401,8 +392,8 @@ func TestBuildGraphDefinition_ExternalComponentSkip(t *testing.T) {
 	// External component E: ComputeComponentDigest only (referenced by A, no upload with Skip policy)
 	r.Len(tgd.Transformations, 2)
 
-	// Verify environment has both descriptors
-	r.Len(tgd.Environment.Data, 2)
+	// Environment should be empty — all data is now inlined.
+	r.Empty(tgd.Environment.Data)
 }
 
 func TestBuildGraphDefinition_CELExpressionWiring(t *testing.T) {
@@ -573,23 +564,19 @@ func TestBuildGraphDefinition_MixedInputAndAccessResources(t *testing.T) {
 	// No ComputeComponentDigest because no other component references this one.
 	r.Len(tgd.Transformations, 4)
 
-	// Verify environment preserves both input and access correctly
-	envData, ok := tgd.Environment.Data["constructExampleComMixed100"].(map[string]any)
-	r.True(ok, "environment should contain constructor component data")
+	// Environment should be empty — all data is now inlined.
+	r.Empty(tgd.Environment.Data)
 
-	resources, ok := envData["resources"].([]any)
-	r.True(ok)
-	r.Len(resources, 2)
-
-	// First resource (input-based) should have input in environment, no access
-	inputRes, ok := resources[0].(map[string]any)
-	r.True(ok)
-	r.NotNil(inputRes["input"], "input resource should preserve input spec in environment")
-	r.Nil(inputRes["access"], "input resource should not have access in environment")
-
-	// Second resource (access-based) should have access, no input
-	accessRes, ok := resources[1].(map[string]any)
-	r.True(ok)
-	r.Nil(accessRes["input"], "access resource should not have input")
-	r.NotNil(accessRes["access"], "access resource should preserve access spec")
+	// Verify the upload transformation has an inline v2 descriptor with both resources.
+	for _, t := range tgd.Transformations {
+		if t.Type.String() == "OCIAddComponentVersion/v1alpha1" {
+			desc, ok := t.Spec.Data["descriptor"].(map[string]any)
+			r.True(ok, "descriptor should be an inline map")
+			comp, ok := desc["component"].(map[string]any)
+			r.True(ok, "v2 descriptor should have component wrapper")
+			resources, ok := comp["resources"].([]any)
+			r.True(ok)
+			r.Len(resources, 2)
+		}
+	}
 }

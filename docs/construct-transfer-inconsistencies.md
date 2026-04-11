@@ -243,7 +243,18 @@ A library user who wants to process a file input spec without the transformation
 - `bindings/go/input/file/blob.go` — `GetV1FileBlob()` returns blob only
 - `bindings/go/oci/transformer/get_local_resource.go` — correct pattern: library call + thin wrapper
 
-**Historical context:** The old `ResourceInputMethod` / `SourceInputMethod` interfaces in `constructor/interface.go` were designed as this missing library layer. They defined a `ProcessResource(ctx, resource, credentials) → (ProcessedResource | ProcessedBlobData)` contract — exactly "given an input spec, produce a resource descriptor + blob." When the transformation architecture replaced sequential orchestration with graph-based execution, the orchestration was correctly replaced, but the library abstraction was accidentally consumed into the transformers. The old interfaces are now dead:
+**Historical context:** The old `ResourceInputMethod` / `SourceInputMethod` interfaces in `constructor/interface.go` were designed as this missing library layer. They defined a `ProcessResource(ctx, resource, credentials) → (ProcessedResource | ProcessedBlobData)` contract — exactly "given an input spec, produce a resource descriptor + blob." When the transformation architecture replaced sequential orchestration with graph-based execution, the orchestration was correctly replaced, but the library abstraction was accidentally consumed into the transformers. Each input package had an `InputMethod` type implementing these interfaces, deleted in commit `4f2e8f910` ("initial ai refactoring of constructor"):
+
+| Package | Deleted file | `InputMethod` implemented |
+|---------|-------------|--------------------------|
+| `input/file` | `method.go` | `ResourceInputMethod`, `SourceInputMethod` |
+| `input/dir` | `method.go` | `ResourceInputMethod`, `SourceInputMethod` |
+| `input/utf8` | `method.go` | `ResourceInputMethod`, `SourceInputMethod` |
+| `helm/input` | `method.go` | `ResourceInputMethod` only |
+
+These were straightforward: convert input spec via scheme → call the existing blob function (`GetV1FileBlob`, `GetV1DirBlob`, `GetV1UTF8Blob`, `GetV1HelmBlob`) → return `ProcessedBlobData` (and optionally `ProcessedResource` for remote Helm charts).
+
+The interfaces and their current status:
 
 | Interface | Status | Consumers |
 |-----------|--------|-----------|
@@ -255,35 +266,6 @@ A library user who wants to process a file input spec without the transformation
 | `SourceConsumerIdentityProvider` | Dead | Embedded in dead `SourceInputMethod` |
 
 Note: `ResourceDigestProcessor` and `ExternalComponentRepositoryProvider` remain live — they are used in the actual graph building and execution flow.
-
-**Fix:** Restore the `InputMethod` types that existed before commit `4f2e8f910` ("initial ai refactoring of constructor"). Each input package had an `InputMethod` struct implementing `constructor.ResourceInputMethod` and `constructor.SourceInputMethod`:
-
-| Package | Deleted file | `InputMethod` implemented |
-|---------|-------------|--------------------------|
-| `input/file` | `method.go` | `ResourceInputMethod`, `SourceInputMethod` |
-| `input/dir` | `method.go` | `ResourceInputMethod`, `SourceInputMethod` |
-| `input/utf8` | `method.go` | `ResourceInputMethod`, `SourceInputMethod` |
-| `helm/input` | `method.go` | `ResourceInputMethod` only |
-
-These were straightforward: convert input spec via scheme → call the existing blob function (`GetV1FileBlob`, `GetV1DirBlob`, `GetV1UTF8Blob`, `GetV1HelmBlob`) → return `ProcessedBlobData` (and optionally `ProcessedResource` for remote Helm charts).
-
-The transformers should then become thin wrappers around the restored `InputMethod`:
-
-```go
-// bindings/go/input/file/transformation/file_input.go — transformer delegates to InputMethod
-func (t *FileInput) Transform(ctx context.Context, step runtime.Typed) (runtime.Typed, error) {
-    // ... deserialize spec ...
-    method := &file.InputMethod{WorkingDirectory: spec.WorkingDirectory}
-    result, err := method.ProcessResource(ctx, resource, nil)
-    // ... buffer result.ProcessedBlobData to file, populate output ...
-}
-```
-
-This mirrors the access-type pattern:
-- Library consumer: creates `file.InputMethod{WorkingDirectory: wd}` and calls `ProcessResource()` directly
-- Transformation graph: `FileInput` transformer creates `InputMethod` internally and delegates
-
-The `ResourceInputMethod` / `SourceInputMethod` interfaces in `constructor/interface.go` remain as the contract. The plugin input registry code (`plugin/manager/registries/input/`) that wraps them becomes live again.
 
 ---
 
@@ -376,6 +358,21 @@ The indirection caused the v1/v2 format divergence (M-1), forced three `buildDes
 1. Restore the `InputMethod` types deleted in commit `4f2e8f910` into each input package (`input/file/method.go`, `input/dir/method.go`, `input/utf8/method.go`, `helm/input/method.go`). These implement `constructor.ResourceInputMethod` / `constructor.SourceInputMethod`.
 2. Refactor each transformer (`FileInput`, `DirInput`, `UTF8Input`, `HelmInput`) to instantiate the corresponding `InputMethod` and delegate to `ProcessResource()` / `ProcessSource()`, then buffer the returned blob and populate the transformation output.
 3. The `ResourceInputMethod` / `SourceInputMethod` interfaces remain in `constructor/interface.go`. The plugin input registry (`plugin/manager/registries/input/`) becomes live again.
+
+**After this change, transformers mirror the access-type pattern:**
+
+```go
+// bindings/go/input/file/transformation/file_input.go — transformer delegates to InputMethod
+func (t *FileInput) Transform(ctx context.Context, step runtime.Typed) (runtime.Typed, error) {
+    // ... deserialize spec ...
+    method := &file.InputMethod{WorkingDirectory: spec.WorkingDirectory}
+    result, err := method.ProcessResource(ctx, resource, nil)
+    // ... buffer result.ProcessedBlobData to file, populate output ...
+}
+```
+
+- Library consumer: creates `file.InputMethod{WorkingDirectory: wd}` and calls `ProcessResource()` directly
+- Transformation graph: `FileInput` transformer creates `InputMethod` internally and delegates
 
 ---
 

@@ -15,6 +15,7 @@ import (
 	"ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/oci"
 	"ocm.software/open-component-model/bindings/go/repository/component/resolvers"
 	"ocm.software/open-component-model/bindings/go/runtime"
+	signingv1alpha1 "ocm.software/open-component-model/bindings/go/signing/transformation/spec/v1alpha1"
 	transformv1alpha1 "ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1/meta"
 )
@@ -169,6 +170,25 @@ func fillGraphDefinitionWithPrefetchedComponents(
 	slog.DebugContext(ctx, "building transformations for discovered components",
 		"components", len(d.Vertices))
 
+	// Scan for referenced components that need digest computation.
+	// A component is "referenced" if another component's descriptor lists it in
+	// componentReferences. For each such child we record:
+	//   - referencedComponents: set of baseIDs that need a ComputeComponentDigest node
+	//   - expectedDigests: the digest the parent declared, keyed by "<baseID>Digest"
+	referencedComponents := make(map[string]struct{})
+	expectedDigests := make(map[string]*descruntime.Digest)
+	for _, v := range d.Vertices {
+		val := v.Attributes[dagsync.AttributeValue].(*discoveryValue)
+		for _, ref := range val.Descriptor.Component.References {
+			refID := graphinternal.IdentityToTransformationID("transform", ref.ToComponentIdentity())
+			referencedComponents[refID] = struct{}{}
+			if ref.Digest.Value != "" {
+				dig := ref.Digest // capture loop variable
+				expectedDigests[refID+"Digest"] = &dig
+			}
+		}
+	}
+
 	for key, v := range d.Vertices {
 		val := v.Attributes[dagsync.AttributeValue].(*discoveryValue)
 		component := val.Descriptor.Component.Name
@@ -187,6 +207,16 @@ func fillGraphDefinitionWithPrefetchedComponents(
 		descMap, err := graphinternal.DescriptorToMap(v2desc)
 		if err != nil {
 			return err
+		}
+
+		// Build referenceDigestIDs for this component's references so the upload
+		// transformation's descriptor carries CEL refs to child digest outputs.
+		referenceDigestIDs := make(map[int]string)
+		for i, ref := range v2desc.Component.References {
+			refBaseID := graphinternal.IdentityToTransformationID("transform", ref.ToComponentIdentity())
+			if _, ok := referencedComponents[refBaseID]; ok {
+				referenceDigestIDs[i] = refBaseID + "Digest"
+			}
 		}
 
 		targets := targetMap[key]
@@ -211,9 +241,14 @@ func fillGraphDefinitionWithPrefetchedComponents(
 				return err
 			}
 
-			if err := addUploadTransformation(descMap, id, target, tgd, resourceTransformIDs); err != nil {
+			if err := addUploadTransformation(descMap, id, target, tgd, resourceTransformIDs, referenceDigestIDs); err != nil {
 				return err
 			}
+		}
+
+		// Add ComputeComponentDigest if another component references this one.
+		if _, isReferenced := referencedComponents[baseID]; isReferenced {
+			addComputeDigestTransformation(baseID, expectedDigests[baseID+"Digest"], tgd)
 		}
 	}
 	return nil
@@ -293,9 +328,10 @@ func processResource(resource descriptorv2.Resource, access runtime.Typed, id st
 }
 
 // addUploadTransformation creates the final upload (AddComponentVersion) transformation
-// for a component, reconstructing the descriptor with CEL references to modified resources.
-func addUploadTransformation(descMap map[string]any, id string, toSpec runtime.Typed, tgd *transformv1alpha1.TransformationGraphDefinition, resourceTransformIDs map[int]string) error {
-	descriptorSpec := graphinternal.BuildInlineDescriptorSpec(descMap, resourceTransformIDs, nil, nil)
+// for a component, reconstructing the descriptor with CEL references to modified resources
+// and recomputed reference digests.
+func addUploadTransformation(descMap map[string]any, id string, toSpec runtime.Typed, tgd *transformv1alpha1.TransformationGraphDefinition, resourceTransformIDs map[int]string, referenceDigestIDs map[int]string) error {
+	descriptorSpec := graphinternal.BuildInlineDescriptorSpec(descMap, resourceTransformIDs, nil, referenceDigestIDs)
 
 	addType, err := graphinternal.ChooseAddType(toSpec)
 	if err != nil {
@@ -320,4 +356,31 @@ func addUploadTransformation(descMap map[string]any, id string, toSpec runtime.T
 
 	tgd.Transformations = append(tgd.Transformations, upload)
 	return nil
+}
+
+// addComputeDigestTransformation adds a ComputeComponentDigest transformation for a
+// transferred component that is referenced by another. The descriptor is always taken
+// from the Upload transformation's spec (transfer always produces an upload).
+// If expectedDigest is non-nil, it is included for verification against the recomputed value.
+func addComputeDigestTransformation(baseID string, expectedDigest *descruntime.Digest, tgd *transformv1alpha1.TransformationGraphDefinition) {
+	digestID := baseID + "Digest"
+
+	specData := map[string]any{
+		"descriptor": fmt.Sprintf("${%sUpload.spec.descriptor}", baseID),
+	}
+	if expectedDigest != nil {
+		specData["expectedDigest"] = map[string]any{
+			"hashAlgorithm":          expectedDigest.HashAlgorithm,
+			"normalisationAlgorithm": expectedDigest.NormalisationAlgorithm,
+			"value":                  expectedDigest.Value,
+		}
+	}
+
+	tgd.Transformations = append(tgd.Transformations, transformv1alpha1.GenericTransformation{
+		TransformationMeta: meta.TransformationMeta{
+			Type: signingv1alpha1.ComputeComponentDigestV1alpha1,
+			ID:   digestID,
+		},
+		Spec: &runtime.Unstructured{Data: specData},
+	})
 }

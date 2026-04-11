@@ -18,6 +18,7 @@ import (
 	"ocm.software/open-component-model/bindings/go/repository"
 	"ocm.software/open-component-model/bindings/go/repository/component/resolvers"
 	"ocm.software/open-component-model/bindings/go/runtime"
+	signingv1alpha1 "ocm.software/open-component-model/bindings/go/signing/transformation/spec/v1alpha1"
 )
 
 // --- test helpers ---
@@ -281,7 +282,8 @@ func TestBuildGraphDefinition_Recursive(t *testing.T) {
 	tgd, err := BuildGraphDefinition(t.Context(), roots, true, CopyModeLocalBlobResources, UploadAsDefault)
 	require.NoError(t, err)
 
-	assert.Len(t, tgd.Transformations, 2)
+	// Root upload + child upload + child ComputeComponentDigest
+	assert.Len(t, tgd.Transformations, 3)
 }
 
 func TestBuildGraphDefinition_ResolverError(t *testing.T) {
@@ -405,15 +407,21 @@ func TestBuildGraphDefinition_RecursiveTargetPropagation(t *testing.T) {
 	tgd, err := BuildGraphDefinition(t.Context(), roots, true, CopyModeLocalBlobResources, UploadAsDefault)
 	require.NoError(t, err)
 
-	// Both root and child should produce upload transformations to the same target
+	// Both root and child should produce upload transformations to the same target,
+	// plus child gets a ComputeComponentDigest node since root references it.
 	uploadCount := 0
+	digestCount := 0
 	for _, tr := range tgd.Transformations {
 		if strings.Contains(tr.ID, "Upload") {
 			uploadCount++
 		}
+		if tr.Type == signingv1alpha1.ComputeComponentDigestV1alpha1 {
+			digestCount++
+		}
 	}
 	assert.Equal(t, 2, uploadCount, "expected 2 upload transformations, one for root and one for child")
-	assert.Len(t, tgd.Transformations, 2)
+	assert.Equal(t, 1, digestCount, "expected 1 ComputeComponentDigest for the referenced child")
+	assert.Len(t, tgd.Transformations, 3)
 }
 
 func TestBuildGraphDefinition_RecursiveResolverPropagation(t *testing.T) {
@@ -445,8 +453,9 @@ func TestBuildGraphDefinition_RecursiveResolverPropagation(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, tgd)
 
-	// Both root and child are resolved via the propagated resolver
-	assert.Len(t, tgd.Transformations, 2)
+	// Both root and child are resolved via the propagated resolver;
+	// child also gets ComputeComponentDigest since root references it.
+	assert.Len(t, tgd.Transformations, 3)
 	uploadCount := 0
 	for _, tr := range tgd.Transformations {
 		if strings.Contains(tr.ID, "Upload") {

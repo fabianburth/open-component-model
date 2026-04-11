@@ -381,12 +381,12 @@ The indirection caused the v1/v2 format divergence (M-1), forced three `buildDes
 
 **Goal:** Eliminate remaining code duplication (C-2, C-3, C-4).
 
-**Placement:** With Strategy 4 merging construct and transfer into `graph/`, the duplicated helpers simply become shared code within the module. For utilities that are genuinely generic:
-- `AsUnstructured(typed)` → `bindings/go/runtime/` (pure `runtime.Typed` → `runtime.Unstructured` conversion)
-- `ConvertToConcreteRepo`, `ChooseAddType`, `ChooseGetLocalResourceType`, `ChooseAddLocalResourceType` → `bindings/go/oci/` (OCI/CTF type selection)
-- `IdentityToTransformationID(prefix, id)` → shared code in `graph/` module (internal package or root)
+**Placement:** With Strategy 4 merging construct and transfer into `graph/`, most duplicated helpers become shared code within the module:
+- `IdentityToTransformationID(prefix, id)` → shared internal package in `graph/` (graph-ID concern)
+- `ConvertToConcreteRepo`, `ChooseAddType`, `ChooseGetLocalResourceType`, `ChooseAddLocalResourceType` → shared internal package in `graph/` (repository-type dispatch for graph generation — not OCI-specific despite only having OCI/CTF cases today; adding e.g. S3 repositories would add cases here)
+- `AsUnstructured(typed)` → `bindings/go/runtime/` (pure `runtime.Typed` → `runtime.Unstructured` conversion, no domain knowledge)
 
-**Impact:** C-3, C-4 are resolved automatically by the merge. C-2 resolved by placing `ConvertToConcreteRepo` in `oci/`.
+**Impact:** C-3, C-4 resolved automatically by the merge. C-2 resolved by placing `ConvertToConcreteRepo` in the shared `graph/` internal package.
 
 ---
 

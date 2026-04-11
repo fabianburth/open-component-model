@@ -8,10 +8,10 @@ import (
 	"os/exec"
 	"sync"
 
-	"ocm.software/open-component-model/bindings/go/constructor"
 	digestprocessorv1 "ocm.software/open-component-model/bindings/go/plugin/manager/contracts/digestprocessor/v1"
 	"ocm.software/open-component-model/bindings/go/plugin/manager/registries/plugins"
 	mtypes "ocm.software/open-component-model/bindings/go/plugin/manager/types"
+	"ocm.software/open-component-model/bindings/go/repository"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 
@@ -28,7 +28,7 @@ func NewDigestProcessorRegistry(ctx context.Context) *RepositoryRegistry {
 		scheme:                         runtime.NewScheme(runtime.WithAllowUnknown()),
 		registry:                       make(map[runtime.Type]mtypes.Plugin),
 		constructedPlugins:             make(map[string]*constructedPlugin),
-		internalDigestProcessorPlugins: make(map[runtime.Type]constructor.ResourceDigestProcessor),
+		internalDigestProcessorPlugins: make(map[runtime.Type]repository.ResourceDigestProcessor),
 	}
 }
 
@@ -62,7 +62,7 @@ type RepositoryRegistry struct {
 	capabilities                   map[string]digestprocessorv1.CapabilitySpec
 	registry                       map[runtime.Type]mtypes.Plugin
 	constructedPlugins             map[string]*constructedPlugin
-	internalDigestProcessorPlugins map[runtime.Type]constructor.ResourceDigestProcessor
+	internalDigestProcessorPlugins map[runtime.Type]repository.ResourceDigestProcessor
 }
 
 // Shutdown will loop through all _STARTED_ plugins and will send an Interrupt signal to them.
@@ -126,7 +126,7 @@ func startAndReturnPlugin(ctx context.Context, r *RepositoryRegistry, plugin *mt
 	return digestPlugin, nil
 }
 
-func (r *RepositoryRegistry) GetPlugin(ctx context.Context, spec runtime.Typed) (constructor.ResourceDigestProcessor, error) {
+func (r *RepositoryRegistry) GetPlugin(ctx context.Context, spec runtime.Typed) (repository.ResourceDigestProcessor, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

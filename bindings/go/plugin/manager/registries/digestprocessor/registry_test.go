@@ -12,13 +12,13 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"ocm.software/open-component-model/bindings/go/constructor"
 	descriptor "ocm.software/open-component-model/bindings/go/descriptor/runtime"
 	"ocm.software/open-component-model/bindings/go/plugin/internal/dummytype"
 	dummyv1 "ocm.software/open-component-model/bindings/go/plugin/internal/dummytype/v1"
 	v1 "ocm.software/open-component-model/bindings/go/plugin/manager/contracts/digestprocessor/v1"
 	inputv1 "ocm.software/open-component-model/bindings/go/plugin/manager/contracts/input/v1"
 	mtypes "ocm.software/open-component-model/bindings/go/plugin/manager/types"
+	"ocm.software/open-component-model/bindings/go/repository"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 
@@ -267,4 +267,4 @@ func (m *mockDigestProcessorPlugin) ProcessResourceDigest(ctx context.Context, r
 	return nil, nil
 }
 
-var _ constructor.ResourceDigestProcessor = (*mockDigestProcessorPlugin)(nil)
+var _ repository.ResourceDigestProcessor = (*mockDigestProcessorPlugin)(nil)

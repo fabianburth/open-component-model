@@ -1,7 +1,7 @@
 package digestprocessor
 
 import (
-	"ocm.software/open-component-model/bindings/go/constructor"
+	"ocm.software/open-component-model/bindings/go/repository"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 
@@ -12,6 +12,6 @@ import (
 // plugins are not compiled in, they cannot have a scheme and therefore, cannot
 // implement this interface.
 type BuiltinDigestProcessorPlugin interface {
-	constructor.ResourceDigestProcessor
+	repository.ResourceDigestProcessor
 	GetResourceRepositoryScheme() *runtime.Scheme
 }

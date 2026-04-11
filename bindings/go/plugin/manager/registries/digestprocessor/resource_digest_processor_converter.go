@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"ocm.software/open-component-model/bindings/go/constructor"
 	descriptor "ocm.software/open-component-model/bindings/go/descriptor/runtime"
 	descriptorv2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	"ocm.software/open-component-model/bindings/go/plugin/manager/contracts/digestprocessor/v1"
+	"ocm.software/open-component-model/bindings/go/repository"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 
@@ -47,7 +47,7 @@ func (r *resourceDigestProcessorPluginConverter) ProcessResourceDigest(ctx conte
 	return &convert[0], nil
 }
 
-var _ constructor.ResourceDigestProcessor = (*resourceDigestProcessorPluginConverter)(nil)
+var _ repository.ResourceDigestProcessor = (*resourceDigestProcessorPluginConverter)(nil)
 
 func (r *RepositoryRegistry) externalToResourceDigestProcessorPluginConverter(plugin v1.ResourceDigestProcessorContract, scheme *runtime.Scheme) *resourceDigestProcessorPluginConverter {
 	return &resourceDigestProcessorPluginConverter{

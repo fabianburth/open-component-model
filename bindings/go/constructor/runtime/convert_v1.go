@@ -3,7 +3,7 @@ package runtime
 import (
 	"maps"
 
-	v1 "ocm.software/open-component-model/bindings/go/constructor/spec/v1"
+	v1 "ocm.software/open-component-model/bindings/go/constructor/v2"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 

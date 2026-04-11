@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	v1 "ocm.software/open-component-model/bindings/go/constructor/spec/v1"
+	v1 "ocm.software/open-component-model/bindings/go/constructor/v2"
 	rt "ocm.software/open-component-model/bindings/go/runtime"
 )
 

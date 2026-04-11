@@ -1,4 +1,4 @@
-package v1
+package v2
 
 import (
 	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"

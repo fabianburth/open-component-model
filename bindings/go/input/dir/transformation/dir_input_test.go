@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"ocm.software/open-component-model/bindings/go/blob/filesystem"
-	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/spec/v1"
+	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/v2"
 	"ocm.software/open-component-model/bindings/go/input/dir/transformation"
 	"ocm.software/open-component-model/bindings/go/input/dir/transformation/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/runtime"

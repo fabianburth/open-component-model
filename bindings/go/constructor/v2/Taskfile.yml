@@ -1,7 +1,7 @@
 version: '3'
 
 includes:
-  reuse: ../../../../../reuse.Taskfile.yml
+  reuse: ../../../../reuse.Taskfile.yml
 
 tasks:
   test:

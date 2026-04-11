@@ -1,7 +1,7 @@
 package v1
 
 import (
-	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/spec/v1"
+	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/v2"
 	descriptorv2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	"ocm.software/open-component-model/bindings/go/plugin/manager/types"
 	"ocm.software/open-component-model/bindings/go/runtime"

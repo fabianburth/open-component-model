@@ -16,7 +16,7 @@ import (
 
 	"ocm.software/open-component-model/bindings/go/constructor"
 	constructorruntime "ocm.software/open-component-model/bindings/go/constructor/runtime"
-	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/spec/v1"
+	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/v2"
 	"ocm.software/open-component-model/bindings/go/oci/compref"
 	ocires "ocm.software/open-component-model/bindings/go/oci/repository/resource"
 	ctfv1 "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/ctf"

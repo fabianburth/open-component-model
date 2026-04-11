@@ -17,7 +17,7 @@ import (
 
 	"ocm.software/open-component-model/bindings/go/blob"
 	"ocm.software/open-component-model/bindings/go/constructor"
-	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/v2"
+	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/v1"
 	helmv1 "ocm.software/open-component-model/bindings/go/helm/input/spec/v1"
 	v1 "ocm.software/open-component-model/bindings/go/plugin/manager/contracts/input/v1"
 	mtypes "ocm.software/open-component-model/bindings/go/plugin/manager/types"

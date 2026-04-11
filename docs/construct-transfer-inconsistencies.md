@@ -305,7 +305,7 @@ constructor/                  (current)
 
 2. **Library interfaces are trapped in the heavy module.** `ResourceInputMethod`, `SourceInputMethod`, and their result types live in `constructor/interface.go`. Input packages that want to implement these interfaces must import the full `constructor` module.
 
-3. **`constructor/v2` is misnamed.** The constructor format is based on the v2 descriptor schema. The `v1` name is the spec version, not the descriptor version, but this creates confusion when both `constructor/v2` and `descriptor/v2` coexist.
+3. **`constructor/v1` is misnamed.** The constructor format is based on the v2 descriptor schema. The `v1` name is the spec version, not the descriptor version, but this creates confusion when both `constructor/v1` and `descriptor/v2` coexist.
 
 4. **`ResourceDigestProcessor` is duplicated.** It's defined in both `constructor/interface.go` and `repository/interface.go` with the same signature. The constructor version should be dropped in favor of the `repository` one (which is already used by the actual transformers).
 
@@ -445,7 +445,7 @@ descriptor/                     constructor/              (after restructure)
 **Dependencies of `graph/` module:**
 
 ```
-graph/ ──→ constructor/runtime, constructor/v2          (construct input types)
+graph/ ──→ constructor/runtime, constructor/v1          (construct input types)
        ──→ descriptor/runtime, descriptor/v2            (transfer input types)
        ──→ descriptor/normalisation                     (ComputeComponentDigest)
        ──→ transform/                                   (graph engine)
@@ -465,13 +465,13 @@ All previous concerns about merging are resolved:
 
 **Changes:**
 
-1. **Rename `constructor/v2` → `constructor/v2`** (new module path: `ocm.software/.../constructor/v2`). The constructor format is based on the v2 descriptor schema. Hard rename — update all importers in one shot, no redirect module.
+1. **Rename `constructor/v1` → `constructor/v1`** (new module path: `ocm.software/.../constructor/v1`). The constructor format is based on the v2 descriptor schema. Hard rename — update all importers in one shot, no redirect module.
 
 2. **Extract `constructor/runtime` into its own module** (new module path: `ocm.software/.../constructor/runtime`). Contains:
    - Runtime types: `Component`, `Resource`, `Source`, `AccessOrInput`, `Reference`, `Digest`, `Label`, `CopyPolicy`, etc.
    - Conversion functions: `ConvertToV1Component`, `ConvertFromV2`, `ConvertToV2Resource`, etc.
    - Library interfaces: `ResourceInputMethod`, `SourceInputMethod`, result types, `ResourceConsumerIdentityProvider`, `SourceConsumerIdentityProvider`, `ExternalComponentRepositoryProvider`
-   - Dependencies: `runtime`, `blob`, `descriptor/runtime`, `constructor/v2`, `repository` — all lightweight
+   - Dependencies: `runtime`, `blob`, `descriptor/runtime`, `constructor/v1`, `repository` — all lightweight
 
 3. **Create `bindings/go/graph/` module** (new module path: `ocm.software/.../graph`). Contains:
    - `graph/construct/` — `BuildGraphDefinition` for construction (from `constructor/constructor.go`, `constructor/internal/graph/`)
@@ -482,7 +482,7 @@ All previous concerns about merging are resolved:
 
 4. **Drop `ResourceDigestProcessor` from `constructor/interface.go`.** Use `repository.ResourceDigestProcessor` everywhere.
 
-5. **Delete old modules:** `constructor/go.mod` and `transfer/go.mod`. Their content has moved to `constructor/runtime`, `constructor/v2`, and `graph/`.
+5. **Delete old modules:** `constructor/go.mod` and `transfer/go.mod`. Their content has moved to `constructor/runtime`, `constructor/v1`, and `graph/`.
 
 **Dependency impact:**
 
@@ -493,7 +493,7 @@ All previous concerns about merging are resolved:
 | `plugin/manager` | → full `constructor` module | → `constructor/runtime` (lightweight) |
 | `cli` (`add component-version`) | → `constructor` module | → `graph/construct` |
 | `cli` (`transfer component-version`) | → `transfer` module | → `graph/transfer` |
-| `graph/` (new) | — | → `constructor/runtime`, `constructor/v2`, `descriptor/*`, `transform/`, `oci/`, `helm/`, `signing/`, `input/*` |
+| `graph/` (new) | — | → `constructor/runtime`, `constructor/v1`, `descriptor/*`, `transform/`, `oci/`, `helm/`, `signing/`, `input/*` |
 
 ---
 
@@ -541,7 +541,7 @@ func (t *FileInput) Transform(ctx context.Context, step runtime.Typed) (runtime.
 
 ### Implementation Note: Go Workspace for Unpublished Modules
 
-Phase 2 introduces new modules (`constructor/v2`, `constructor/runtime`, `graph/`) that will not be published to a module proxy at the time of implementation. The Go workspace (`go.work`) must include the new module directories so that local resolution works without published versions.
+Phase 2 introduces new modules (`constructor/v1`, `constructor/runtime`, `graph/`) that will not be published to a module proxy at the time of implementation. The Go workspace (`go.work`) must include the new module directories so that local resolution works without published versions.
 
 Use `task init/go.work` to regenerate the workspace after creating new modules. The workspace ensures `go build` and `go test` resolve all local modules against each other. Note that `go mod tidy` does **not** respect the workspace — it resolves against the module proxy and will fail for unpublished modules. Defer `task tidy` until the new modules are published.
 
@@ -558,7 +558,7 @@ Module restructuring comes first to avoid touching the same code twice — subse
 
 | # | Issue | Action | Effort |
 |---|-------|--------|--------|
-| 3 | A-2 | Rename `constructor/v2` → `constructor/v2` — hard rename, update all importers in one shot | Small |
+| 3 | A-2 | Rename `constructor/v1` → `constructor/v1` — hard rename, update all importers in one shot | Small |
 | 4 | A-2 | Extract `constructor/runtime` into its own module with library interfaces per Strategy 4 | Medium |
 | 5 | A-2 | Create `bindings/go/graph/` module (`ocm.software/.../graph`), merge construct + transfer graph generation per Strategy 4 — includes deduplicating shared helpers (C-2, C-3, C-4) during the merge | Large |
 | 6 | A-2 | Drop duplicate `ResourceDigestProcessor`, delete old `constructor` and `transfer` root modules | Small |

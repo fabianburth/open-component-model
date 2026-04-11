@@ -1,4 +1,4 @@
-module ocm.software/open-component-model/bindings/go/constructor/v2
+module ocm.software/open-component-model/bindings/go/constructor/v1
 
 go 1.26.1
 

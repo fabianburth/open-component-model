@@ -1,4 +1,4 @@
-package v2_test
+package v1_test
 
 import (
 	"encoding/json"
@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	v1 "ocm.software/open-component-model/bindings/go/constructor/v2"
+	v1 "ocm.software/open-component-model/bindings/go/constructor/v1"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 

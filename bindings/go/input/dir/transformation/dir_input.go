@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 
 	"ocm.software/open-component-model/bindings/go/blob/filesystem"
-	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/v2"
+	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/v1"
 	dir "ocm.software/open-component-model/bindings/go/input/dir"
 	dirv1 "ocm.software/open-component-model/bindings/go/input/dir/spec/v1"
 	"ocm.software/open-component-model/bindings/go/input/dir/transformation/spec/v1alpha1"

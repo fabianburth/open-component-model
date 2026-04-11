@@ -8,7 +8,7 @@ import (
 	"os"
 
 	"ocm.software/open-component-model/bindings/go/blob/filesystem"
-	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/v2"
+	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/v1"
 	"ocm.software/open-component-model/bindings/go/credentials"
 	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	helminput "ocm.software/open-component-model/bindings/go/helm/input"

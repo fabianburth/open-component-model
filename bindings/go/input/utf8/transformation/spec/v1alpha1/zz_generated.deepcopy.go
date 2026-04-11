@@ -6,7 +6,7 @@
 package v1alpha1
 
 import (
-	constructorv2 "ocm.software/open-component-model/bindings/go/constructor/v2"
+	constructorv2 "ocm.software/open-component-model/bindings/go/constructor/v1"
 	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	runtime "ocm.software/open-component-model/bindings/go/runtime"
 )

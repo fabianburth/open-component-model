@@ -34,4 +34,4 @@
 //	        type: OCIImage/v1
 //	        imageReference: ghcr.io/stefanprodan/podinfo:6.8.0
 //	      version: 6.8.0
-package v2
+package v1

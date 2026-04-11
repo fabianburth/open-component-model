@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"ocm.software/open-component-model/bindings/go/blob/filesystem"
-	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/v2"
+	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/v1"
 	utf8pkg "ocm.software/open-component-model/bindings/go/input/utf8"
 	v1 "ocm.software/open-component-model/bindings/go/input/utf8/spec/v1"
 	"ocm.software/open-component-model/bindings/go/input/utf8/transformation/spec/v1alpha1"

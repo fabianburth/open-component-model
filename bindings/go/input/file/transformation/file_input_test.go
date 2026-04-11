@@ -2,6 +2,7 @@ package transformation_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"ocm.software/open-component-model/bindings/go/blob/filesystem"
+	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/spec/v1"
 	"ocm.software/open-component-model/bindings/go/input/file/transformation"
 	"ocm.software/open-component-model/bindings/go/input/file/transformation/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/runtime"
@@ -19,6 +21,19 @@ func newScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
 	s.MustRegisterWithAlias(&v1alpha1.FileInput{}, v1alpha1.FileInputV1alpha1)
 	return s
+}
+
+func makeFileInput(path, mediaType string, compress bool) *runtime.Raw {
+	data, _ := json.Marshal(map[string]any{
+		"type":      "file/v1",
+		"path":      path,
+		"mediaType": mediaType,
+		"compress":  compress,
+	})
+	return &runtime.Raw{
+		Type: runtime.NewVersionedType("file", "v1"),
+		Data: data,
+	}
 }
 
 func TestFileInput_Transform(t *testing.T) {
@@ -36,8 +51,11 @@ func TestFileInput_Transform(t *testing.T) {
 		Type: v1alpha1.FileInputV1alpha1,
 		ID:   "test",
 		Spec: &v1alpha1.FileInputSpec{
-			Path:             testFile,
-			MediaType:        "text/plain",
+			Resource: &constructorv1.Resource{
+				AccessOrInput: constructorv1.AccessOrInput{
+					Input: makeFileInput(testFile, "text/plain", false),
+				},
+			},
 			WorkingDirectory: tempDir,
 		},
 	}
@@ -77,8 +95,11 @@ func TestFileInput_Transform_WithCompression(t *testing.T) {
 		Type: v1alpha1.FileInputV1alpha1,
 		ID:   "test-compress",
 		Spec: &v1alpha1.FileInputSpec{
-			Path:             testFile,
-			Compress:         true,
+			Resource: &constructorv1.Resource{
+				AccessOrInput: constructorv1.AccessOrInput{
+					Input: makeFileInput(testFile, "", true),
+				},
+			},
 			WorkingDirectory: tempDir,
 		},
 	}
@@ -110,7 +131,11 @@ func TestFileInput_Transform_WithOutputPath(t *testing.T) {
 		Type: v1alpha1.FileInputV1alpha1,
 		ID:   "test-output-path",
 		Spec: &v1alpha1.FileInputSpec{
-			Path:             testFile,
+			Resource: &constructorv1.Resource{
+				AccessOrInput: constructorv1.AccessOrInput{
+					Input: makeFileInput(testFile, "", false),
+				},
+			},
 			OutputPath:       outputDir,
 			WorkingDirectory: tempDir,
 		},
@@ -140,7 +165,11 @@ func TestFileInput_Transform_WorkingDirectory(t *testing.T) {
 		Type: v1alpha1.FileInputV1alpha1,
 		ID:   "test-workdir",
 		Spec: &v1alpha1.FileInputSpec{
-			Path:             "relative.txt",
+			Resource: &constructorv1.Resource{
+				AccessOrInput: constructorv1.AccessOrInput{
+					Input: makeFileInput("relative.txt", "", false),
+				},
+			},
 			WorkingDirectory: tempDir,
 		},
 	}
@@ -171,7 +200,7 @@ func TestFileInput_Transform_MissingSpec(t *testing.T) {
 	r.Contains(err.Error(), "spec is required")
 }
 
-func TestFileInput_Transform_MissingPath(t *testing.T) {
+func TestFileInput_Transform_MissingResource(t *testing.T) {
 	r := require.New(t)
 	ctx := context.Background()
 	scheme := newScheme()
@@ -180,11 +209,11 @@ func TestFileInput_Transform_MissingPath(t *testing.T) {
 
 	step := &v1alpha1.FileInput{
 		Type: v1alpha1.FileInputV1alpha1,
-		ID:   "test-no-path",
+		ID:   "test-no-resource",
 		Spec: &v1alpha1.FileInputSpec{},
 	}
 
 	_, err := transformer.Transform(ctx, step)
 	r.Error(err)
-	r.Contains(err.Error(), "path is required")
+	r.Contains(err.Error(), "resource with input is required")
 }

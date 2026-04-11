@@ -2,7 +2,7 @@ package v1alpha1
 
 import (
 	"ocm.software/open-component-model/bindings/go/blob/filesystem/spec/access/v1alpha1"
-	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
+	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/spec/v1"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 
@@ -30,7 +30,7 @@ type HelmInputOutput struct {
 	// File is the file access specification for the produced blob.
 	File v1alpha1.File `json:"file"`
 	// Resource is the resource descriptor populated when the chart is fetched from a remote repository.
-	Resource *v2.Resource `json:"resource,omitempty"`
+	Resource *constructorv1.Resource `json:"resource,omitempty"`
 }
 
 // HelmInputSpec is the input specification for the HelmInput transformation.
@@ -38,20 +38,8 @@ type HelmInputOutput struct {
 // +ocm:jsonschema-gen=true
 type HelmInputSpec struct {
 	// Resource is the resource descriptor this input belongs to.
-	Resource *v2.Resource `json:"resource,omitempty"`
-	// Path is the path to the directory or tgz file containing the chart on the local filesystem.
-	Path string `json:"path,omitempty"`
-	// Repository is an OCI reference specifying the upload location of the fetched chart.
-	// The reference MUST contain a version tag, and it needs to equal the version of the chart.
-	Repository string `json:"repository,omitempty"`
-	// HelmRepository specifies the download location of the helm chart. It can either be a URL or an OCI reference.
-	HelmRepository string `json:"helmRepository,omitempty"`
-	// Version is the version of the chart to download from the remote repository.
-	Version string `json:"version,omitempty"`
-	// CACert is used in combination with HelmRepository to specify a TLS root certificate.
-	CACert string `json:"caCert,omitempty"`
-	// CACertFile is used in combination with HelmRepository to specify a relative filename for TLS root certificate.
-	CACertFile string `json:"caCertFile,omitempty"`
+	// The input-specific attributes (path, repository, helmRepository, version, caCert, caCertFile) are carried in Resource.Input.
+	Resource *constructorv1.Resource `json:"resource,omitempty"`
 	// WorkingDirectory is the base directory for resolving relative paths.
 	WorkingDirectory string `json:"workingDirectory,omitempty"`
 	// OutputPath is the optional directory path to buffer the blob file.

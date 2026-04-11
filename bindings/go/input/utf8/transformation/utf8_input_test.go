@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"ocm.software/open-component-model/bindings/go/blob/filesystem"
+	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/spec/v1"
 	"ocm.software/open-component-model/bindings/go/input/utf8/transformation"
 	"ocm.software/open-component-model/bindings/go/input/utf8/transformation/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/runtime"
@@ -20,6 +21,20 @@ func newScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
 	s.MustRegisterWithAlias(&v1alpha1.UTF8Input{}, v1alpha1.UTF8InputV1alpha1)
 	return s
+}
+
+func makeUTF8Input(opts map[string]any) *runtime.Raw {
+	m := map[string]any{
+		"type": "utf8/v1",
+	}
+	for k, v := range opts {
+		m[k] = v
+	}
+	data, _ := json.Marshal(m)
+	return &runtime.Raw{
+		Type: runtime.NewVersionedType("utf8", "v1"),
+		Data: data,
+	}
 }
 
 func TestUTF8Input_Transform_Text(t *testing.T) {
@@ -33,7 +48,11 @@ func TestUTF8Input_Transform_Text(t *testing.T) {
 		Type: v1alpha1.UTF8InputV1alpha1,
 		ID:   "test-text",
 		Spec: &v1alpha1.UTF8InputSpec{
-			Text: "hello world",
+			Resource: &constructorv1.Resource{
+				AccessOrInput: constructorv1.AccessOrInput{
+					Input: makeUTF8Input(map[string]any{"text": "hello world"}),
+				},
+			},
 		},
 	}
 
@@ -68,7 +87,11 @@ func TestUTF8Input_Transform_JSON(t *testing.T) {
 		Type: v1alpha1.UTF8InputV1alpha1,
 		ID:   "test-json",
 		Spec: &v1alpha1.UTF8InputSpec{
-			JSON: json.RawMessage(`{"name":"test","value":42}`),
+			Resource: &constructorv1.Resource{
+				AccessOrInput: constructorv1.AccessOrInput{
+					Input: makeUTF8Input(map[string]any{"json": json.RawMessage(`{"name":"test","value":42}`)}),
+				},
+			},
 		},
 	}
 
@@ -102,7 +125,11 @@ func TestUTF8Input_Transform_FormattedJSON(t *testing.T) {
 		Type: v1alpha1.UTF8InputV1alpha1,
 		ID:   "test-formatted-json",
 		Spec: &v1alpha1.UTF8InputSpec{
-			FormattedJSON: json.RawMessage(`{"name":"test","value":42}`),
+			Resource: &constructorv1.Resource{
+				AccessOrInput: constructorv1.AccessOrInput{
+					Input: makeUTF8Input(map[string]any{"formattedJson": json.RawMessage(`{"name":"test","value":42}`)}),
+				},
+			},
 		},
 	}
 
@@ -137,7 +164,11 @@ func TestUTF8Input_Transform_YAML(t *testing.T) {
 		Type: v1alpha1.UTF8InputV1alpha1,
 		ID:   "test-yaml",
 		Spec: &v1alpha1.UTF8InputSpec{
-			YAML: json.RawMessage(`{"test":"value"}`),
+			Resource: &constructorv1.Resource{
+				AccessOrInput: constructorv1.AccessOrInput{
+					Input: makeUTF8Input(map[string]any{"yaml": json.RawMessage(`{"test":"value"}`)}),
+				},
+			},
 		},
 	}
 
@@ -170,8 +201,11 @@ func TestUTF8Input_Transform_WithCompression(t *testing.T) {
 		Type: v1alpha1.UTF8InputV1alpha1,
 		ID:   "test-compress",
 		Spec: &v1alpha1.UTF8InputSpec{
-			Text:     "compressible data",
-			Compress: true,
+			Resource: &constructorv1.Resource{
+				AccessOrInput: constructorv1.AccessOrInput{
+					Input: makeUTF8Input(map[string]any{"text": "compressible data", "compress": true}),
+				},
+			},
 		},
 	}
 
@@ -198,7 +232,11 @@ func TestUTF8Input_Transform_WithOutputPath(t *testing.T) {
 		Type: v1alpha1.UTF8InputV1alpha1,
 		ID:   "test-output-path",
 		Spec: &v1alpha1.UTF8InputSpec{
-			Text:       "output path test",
+			Resource: &constructorv1.Resource{
+				AccessOrInput: constructorv1.AccessOrInput{
+					Input: makeUTF8Input(map[string]any{"text": "output path test"}),
+				},
+			},
 			OutputPath: outputDir,
 		},
 	}
@@ -229,7 +267,7 @@ func TestUTF8Input_Transform_MissingSpec(t *testing.T) {
 	r.Contains(err.Error(), "spec is required")
 }
 
-func TestUTF8Input_Transform_EmptySpec(t *testing.T) {
+func TestUTF8Input_Transform_MissingResource(t *testing.T) {
 	r := require.New(t)
 	ctx := context.Background()
 	scheme := newScheme()
@@ -238,11 +276,11 @@ func TestUTF8Input_Transform_EmptySpec(t *testing.T) {
 
 	step := &v1alpha1.UTF8Input{
 		Type: v1alpha1.UTF8InputV1alpha1,
-		ID:   "test-empty-spec",
+		ID:   "test-no-resource",
 		Spec: &v1alpha1.UTF8InputSpec{},
 	}
 
 	_, err := transformer.Transform(ctx, step)
 	r.Error(err)
-	r.Contains(err.Error(), "failed getting utf8 blob")
+	r.Contains(err.Error(), "resource with input is required")
 }

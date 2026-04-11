@@ -30,13 +30,14 @@ func (t *UTF8Input) Transform(ctx context.Context, step runtime.Typed) (runtime.
 
 	spec := transformation.Spec
 
-	// Convert to v1.UTF8 spec for GetV1UTF8Blob
-	v1UTF8 := v1.UTF8{
-		Text:          spec.Text,
-		JSON:          json.RawMessage(spec.JSON),
-		FormattedJSON: json.RawMessage(spec.FormattedJSON),
-		YAML:          json.RawMessage(spec.YAML),
-		Compress:      spec.Compress,
+	if spec.Resource == nil || spec.Resource.Input == nil {
+		return nil, fmt.Errorf("resource with input is required for utf8 input transformation")
+	}
+
+	// Deserialize input-specific attributes from Resource.Input
+	var v1UTF8 v1.UTF8
+	if err := json.Unmarshal(spec.Resource.Input.Data, &v1UTF8); err != nil {
+		return nil, fmt.Errorf("failed deserializing utf8 input from resource: %w", err)
 	}
 
 	blob, err := utf8pkg.GetV1UTF8Blob(v1UTF8)

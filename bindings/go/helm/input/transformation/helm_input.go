@@ -2,13 +2,14 @@ package transformation
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 
 	"ocm.software/open-component-model/bindings/go/blob/filesystem"
+	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/spec/v1"
 	"ocm.software/open-component-model/bindings/go/credentials"
-	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	helminput "ocm.software/open-component-model/bindings/go/helm/input"
 	helmv1 "ocm.software/open-component-model/bindings/go/helm/input/spec/v1"
 	"ocm.software/open-component-model/bindings/go/helm/input/transformation/spec/v1alpha1"
@@ -37,14 +38,14 @@ func (t *HelmInput) Transform(ctx context.Context, step runtime.Typed) (runtime.
 
 	spec := transformation.Spec
 
-	// Convert to v1.Helm spec for GetV1HelmBlob
-	v1Helm := helmv1.Helm{
-		Path:           spec.Path,
-		Repository:     spec.Repository,
-		HelmRepository: spec.HelmRepository,
-		Version:        spec.Version,
-		CACert:         spec.CACert,
-		CACertFile:     spec.CACertFile,
+	if spec.Resource == nil || spec.Resource.Input == nil {
+		return nil, fmt.Errorf("resource with input is required for helm input transformation")
+	}
+
+	// Deserialize input-specific attributes from Resource.Input
+	var v1Helm helmv1.Helm
+	if err := json.Unmarshal(spec.Resource.Input.Data, &v1Helm); err != nil {
+		return nil, fmt.Errorf("failed deserializing helm input from resource: %w", err)
 	}
 
 	// Create a temporary directory for helm processing
@@ -58,8 +59,8 @@ func (t *HelmInput) Transform(ctx context.Context, step runtime.Typed) (runtime.
 	if spec.WorkingDirectory != "" {
 		opts = append(opts, helminput.WithWorkingDirectory(spec.WorkingDirectory))
 	}
-	if t.CredentialProvider != nil && spec.HelmRepository != "" {
-		identity, err := runtime.ParseURLToIdentity(spec.HelmRepository)
+	if t.CredentialProvider != nil && v1Helm.HelmRepository != "" {
+		identity, err := runtime.ParseURLToIdentity(v1Helm.HelmRepository)
 		if err == nil && identity != nil {
 			creds, err := t.CredentialProvider.Resolve(ctx, identity)
 			if err != nil && !errors.Is(err, credentials.ErrNotFound) {
@@ -96,8 +97,8 @@ func (t *HelmInput) Transform(ctx context.Context, step runtime.Typed) (runtime.
 	transformation.Output.Resource = spec.Resource
 
 	// If Repository is set, create a resource access pointing to the remote helm chart
-	if spec.Repository != "" {
-		resource, err := createRemoteResource(chart, spec.Repository)
+	if v1Helm.Repository != "" {
+		resource, err := createRemoteResource(chart, v1Helm.Repository)
 		if err != nil {
 			return nil, fmt.Errorf("failed creating remote resource access: %w", err)
 		}
@@ -107,8 +108,8 @@ func (t *HelmInput) Transform(ctx context.Context, step runtime.Typed) (runtime.
 	return &transformation, nil
 }
 
-// createRemoteResource creates a v2.Resource with OCI access for a helm chart stored in a remote repository.
-func createRemoteResource(chart *helminput.ReadOnlyChart, repository string) (*v2.Resource, error) {
+// createRemoteResource creates a constructorv1.Resource with OCI access for a helm chart stored in a remote repository.
+func createRemoteResource(chart *helminput.ReadOnlyChart, repository string) (*constructorv1.Resource, error) {
 	ref, err := looseref.ParseReference(repository)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse target access image reference %q: %w", repository, err)
@@ -132,21 +133,23 @@ func createRemoteResource(chart *helminput.ReadOnlyChart, repository string) (*v
 		return nil, fmt.Errorf("error setting default type for OCIImage: %w", err)
 	}
 
-	// Convert typed access to runtime.Raw for the v2.Resource
+	// Convert typed access to runtime.Raw for the resource
 	var rawAccess runtime.Raw
 	if err := access.Scheme.Convert(ociAccess, &rawAccess); err != nil {
 		return nil, fmt.Errorf("error converting OCIImage access to raw: %w", err)
 	}
 
-	return &v2.Resource{
-		ElementMeta: v2.ElementMeta{
-			ObjectMeta: v2.ObjectMeta{
+	return &constructorv1.Resource{
+		ElementMeta: constructorv1.ElementMeta{
+			ObjectMeta: constructorv1.ObjectMeta{
 				Name:    chart.Name,
 				Version: chart.Version,
 			},
 		},
 		Type:     helminput.HelmRepositoryType,
-		Relation: v2.ExternalRelation,
-		Access:   &rawAccess,
+		Relation: constructorv1.ExternalRelation,
+		AccessOrInput: constructorv1.AccessOrInput{
+			Access: &rawAccess,
+		},
 	}, nil
 }

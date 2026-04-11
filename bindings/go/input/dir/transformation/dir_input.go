@@ -2,6 +2,7 @@ package transformation
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,28 +31,27 @@ func (t *DirInput) Transform(ctx context.Context, step runtime.Typed) (runtime.T
 
 	spec := transformation.Spec
 
-	if spec.Path == "" {
+	if spec.Resource == nil || spec.Resource.Input == nil {
+		return nil, fmt.Errorf("resource with input is required for dir input transformation")
+	}
+
+	// Deserialize input-specific attributes from Resource.Input
+	var v1Dir dirv1.Dir
+	if err := json.Unmarshal(spec.Resource.Input.Data, &v1Dir); err != nil {
+		return nil, fmt.Errorf("failed deserializing dir input from resource: %w", err)
+	}
+
+	if v1Dir.Path == "" {
 		return nil, fmt.Errorf("path is required for dir input transformation")
 	}
 
 	// Resolve relative paths against the working directory.
 	// GetV1DirBlob uses GetBlobFromPath which expects an absolute path for os.Stat.
-	dirPath := spec.Path
+	dirPath := v1Dir.Path
 	if !filepath.IsAbs(dirPath) && spec.WorkingDirectory != "" {
 		dirPath = filepath.Join(spec.WorkingDirectory, dirPath)
 	}
-
-	// Convert to v1.Dir spec for GetV1DirBlob
-	v1Dir := dirv1.Dir{
-		Path:           dirPath,
-		MediaType:      spec.MediaType,
-		Compress:       spec.Compress,
-		PreserveDir:    spec.PreserveDir,
-		FollowSymlinks: spec.FollowSymlinks,
-		ExcludeFiles:   spec.ExcludeFiles,
-		IncludeFiles:   spec.IncludeFiles,
-		Reproducible:   spec.Reproducible,
-	}
+	v1Dir.Path = dirPath
 
 	blob, err := dir.GetV1DirBlob(ctx, v1Dir, spec.WorkingDirectory)
 	if err != nil {

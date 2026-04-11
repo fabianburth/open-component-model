@@ -2,7 +2,7 @@ package v1alpha1
 
 import (
 	"ocm.software/open-component-model/bindings/go/blob/filesystem/spec/access/v1alpha1"
-	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
+	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/spec/v1"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 
@@ -29,7 +29,7 @@ type DirInputOutput struct {
 	// File is the file access specification for the produced blob.
 	File v1alpha1.File `json:"file"`
 	// Resource is the resource descriptor this input belongs to.
-	Resource *v2.Resource `json:"resource,omitempty"`
+	Resource *constructorv1.Resource `json:"resource,omitempty"`
 }
 
 // DirInputSpec is the input specification for the DirInput transformation.
@@ -37,24 +37,8 @@ type DirInputOutput struct {
 // +ocm:jsonschema-gen=true
 type DirInputSpec struct {
 	// Resource is the resource descriptor this input belongs to.
-	Resource *v2.Resource `json:"resource,omitempty"`
-	// Path is the path to the directory on the local filesystem.
-	Path string `json:"path"`
-	// MediaType is the optional media type of the resulting blob.
-	// If not set, it defaults to application/x-tar.
-	MediaType string `json:"mediaType,omitempty"`
-	// Compress indicates whether the resulting blob should be compressed with gzip.
-	Compress bool `json:"compress,omitempty"`
-	// PreserveDir defines that the directory specified in the Path field should be included in the resulting blob.
-	PreserveDir bool `json:"preserveDir,omitempty"`
-	// FollowSymlinks will include the content of the encountered symbolic links to the resulting blob.
-	FollowSymlinks bool `json:"followSymlinks,omitempty"`
-	// ExcludeFiles is a list of file name patterns to exclude from addition to the resulting blob.
-	ExcludeFiles []string `json:"excludeFiles,omitempty"`
-	// IncludeFiles is a list of file name patterns to exclusively add to the resulting blob.
-	IncludeFiles []string `json:"includeFiles,omitempty"`
-	// Reproducible defines that the attributes of the included files have to be normalized.
-	Reproducible bool `json:"reproducible,omitempty"`
+	// The input-specific attributes (path, mediaType, compress, etc.) are carried in Resource.Input.
+	Resource *constructorv1.Resource `json:"resource,omitempty"`
 	// WorkingDirectory is the base directory for resolving relative paths.
 	WorkingDirectory string `json:"workingDirectory,omitempty"`
 	// OutputPath is the optional directory path to buffer the blob file.

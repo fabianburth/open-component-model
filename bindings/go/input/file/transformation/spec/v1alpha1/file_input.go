@@ -2,7 +2,7 @@ package v1alpha1
 
 import (
 	"ocm.software/open-component-model/bindings/go/blob/filesystem/spec/access/v1alpha1"
-	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
+	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/spec/v1"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 
@@ -29,7 +29,7 @@ type FileInputOutput struct {
 	// File is the file access specification for the produced blob.
 	File v1alpha1.File `json:"file"`
 	// Resource is the resource descriptor this input belongs to.
-	Resource *v2.Resource `json:"resource,omitempty"`
+	Resource *constructorv1.Resource `json:"resource,omitempty"`
 }
 
 // FileInputSpec is the input specification for the FileInput transformation.
@@ -37,14 +37,8 @@ type FileInputOutput struct {
 // +ocm:jsonschema-gen=true
 type FileInputSpec struct {
 	// Resource is the resource descriptor this input belongs to.
-	Resource *v2.Resource `json:"resource,omitempty"`
-	// Path is the path to the file on the local filesystem.
-	Path string `json:"path"`
-	// MediaType is the optional media type of the file.
-	// If not set, it is auto-detected.
-	MediaType string `json:"mediaType,omitempty"`
-	// Compress indicates whether the file should be compressed with gzip.
-	Compress bool `json:"compress,omitempty"`
+	// The input-specific attributes (path, mediaType, compress) are carried in Resource.Input.
+	Resource *constructorv1.Resource `json:"resource,omitempty"`
 	// WorkingDirectory is the base directory for resolving relative paths.
 	WorkingDirectory string `json:"workingDirectory,omitempty"`
 	// OutputPath is the optional directory path to buffer the blob file.

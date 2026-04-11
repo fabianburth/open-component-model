@@ -176,23 +176,23 @@ func processResourceTransformations(
 }
 
 // buildInputTransformation creates the input transformation spec based on the input type.
-// The resourceMap is the v2-style resource descriptor that the input belongs to.
+// The resourceMap is the constructor-style resource descriptor that the input belongs to.
+// The input is embedded into the resource as Resource.Input, and the spec contains
+// only the resource (with input populated), workingDirectory, and outputPath.
 func buildInputTransformation(input runtime.Typed, workingDirectory string, resourceMap map[string]any) (runtime.Type, *runtime.Unstructured, error) {
 	inputType := input.GetType()
 
-	// Marshal the input to get its raw data, then build the transformation spec
-	rawData, err := json.Marshal(input)
+	// Marshal the input to get its raw data for embedding in the resource
+	rawInputData, err := json.Marshal(input)
 	if err != nil {
 		return runtime.Type{}, nil, fmt.Errorf("cannot marshal input spec: %w", err)
 	}
+
+	// Build the input as a map to embed in the resource
 	var inputMap map[string]any
-	if err := json.Unmarshal(rawData, &inputMap); err != nil {
+	if err := json.Unmarshal(rawInputData, &inputMap); err != nil {
 		return runtime.Type{}, nil, fmt.Errorf("cannot unmarshal input spec: %w", err)
 	}
-
-	// Remove the "type" field — it belongs to the constructor input envelope,
-	// not the transformation spec (which has additionalProperties: false).
-	delete(inputMap, "type")
 
 	// Map the constructor input type to the corresponding transformation type.
 	// Constructor input types use "type/version" format (e.g., "file/v1"),
@@ -215,17 +215,20 @@ func buildInputTransformation(input runtime.Typed, workingDirectory string, reso
 		return runtime.Type{}, nil, fmt.Errorf("unsupported input type %q", inputType)
 	}
 
+	// Build a constructorv1.Resource-shaped map with input populated
+	fullResourceMap := make(map[string]any, len(resourceMap)+1)
+	maps.Copy(fullResourceMap, resourceMap)
+	fullResourceMap["input"] = inputMap
+
+	// Build the transformation spec: resource with input, plus workingDirectory/outputPath
+	specMap := map[string]any{
+		"resource": fullResourceMap,
+	}
+
 	// Inject workingDirectory only for input types that support it
 	if supportsWorkingDirectory && workingDirectory != "" {
-		if wd, ok := inputMap["workingDirectory"]; !ok || wd == "" || wd == nil {
-			inputMap["workingDirectory"] = workingDirectory
-		}
+		specMap["workingDirectory"] = workingDirectory
 	}
 
-	// Inject the resource descriptor into the input spec
-	if resourceMap != nil {
-		inputMap["resource"] = resourceMap
-	}
-
-	return transformType, &runtime.Unstructured{Data: inputMap}, nil
+	return transformType, &runtime.Unstructured{Data: specMap}, nil
 }

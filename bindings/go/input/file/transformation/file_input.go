@@ -2,6 +2,7 @@ package transformation
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 
@@ -29,15 +30,18 @@ func (t *FileInput) Transform(ctx context.Context, step runtime.Typed) (runtime.
 
 	spec := transformation.Spec
 
-	if spec.Path == "" {
-		return nil, fmt.Errorf("path is required for file input transformation")
+	if spec.Resource == nil || spec.Resource.Input == nil {
+		return nil, fmt.Errorf("resource with input is required for file input transformation")
 	}
 
-	// Convert to v1.File spec for GetV1FileBlob
-	v1File := filev1.File{
-		Path:      spec.Path,
-		MediaType: spec.MediaType,
-		Compress:  spec.Compress,
+	// Deserialize input-specific attributes from Resource.Input
+	var v1File filev1.File
+	if err := json.Unmarshal(spec.Resource.Input.Data, &v1File); err != nil {
+		return nil, fmt.Errorf("failed deserializing file input from resource: %w", err)
+	}
+
+	if v1File.Path == "" {
+		return nil, fmt.Errorf("path is required for file input transformation")
 	}
 
 	blob, err := file.GetV1FileBlob(v1File, spec.WorkingDirectory)

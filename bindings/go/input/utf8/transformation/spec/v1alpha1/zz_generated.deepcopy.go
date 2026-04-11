@@ -6,9 +6,7 @@
 package v1alpha1
 
 import (
-	json "encoding/json"
-
-	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
+	v1 "ocm.software/open-component-model/bindings/go/constructor/spec/v1"
 	runtime "ocm.software/open-component-model/bindings/go/runtime"
 )
 
@@ -53,7 +51,7 @@ func (in *UTF8InputOutput) DeepCopyInto(out *UTF8InputOutput) {
 	out.File = in.File
 	if in.Resource != nil {
 		in, out := &in.Resource, &out.Resource
-		*out = new(v2.Resource)
+		*out = new(v1.Resource)
 		(*in).DeepCopyInto(*out)
 	}
 	return
@@ -74,23 +72,8 @@ func (in *UTF8InputSpec) DeepCopyInto(out *UTF8InputSpec) {
 	*out = *in
 	if in.Resource != nil {
 		in, out := &in.Resource, &out.Resource
-		*out = new(v2.Resource)
+		*out = new(v1.Resource)
 		(*in).DeepCopyInto(*out)
-	}
-	if in.JSON != nil {
-		in, out := &in.JSON, &out.JSON
-		*out = make(json.RawMessage, len(*in))
-		copy(*out, *in)
-	}
-	if in.FormattedJSON != nil {
-		in, out := &in.FormattedJSON, &out.FormattedJSON
-		*out = make(json.RawMessage, len(*in))
-		copy(*out, *in)
-	}
-	if in.YAML != nil {
-		in, out := &in.YAML, &out.YAML
-		*out = make(json.RawMessage, len(*in))
-		copy(*out, *in)
 	}
 	return
 }

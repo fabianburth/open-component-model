@@ -1,108 +1,145 @@
-# Plan: Add constructor spec types to descriptor/v2 module, use in input transformation specs
+# Plan: Extract constructor/spec/v1 into its own module, use in input transformation specs
 
 ## Context
 
-Input transformation specs (FileInput, DirInput, UTF8Input, HelmInput) use `*v2.Resource` for their `Resource` field, but `v2.Resource` only has `Access *runtime.Raw` — not `Input`. The constructor's `spec/v1.Resource` has `AccessOrInput` supporting both. We can't import `constructor/spec/v1` from input specs (circular dep: constructor → input/* → can't import constructor). So we create `descriptor/v2/constructor/` that copies the constructor spec types. The `descriptor/v2` module already has the exact same deps (`runtime`, `yaml`, `jsonschema/v6`).
+Input transformation specs (FileInput, DirInput, UTF8Input, HelmInput) use `*v2.Resource` for their `Resource` field, but `v2.Resource` only has `Access *runtime.Raw` — not `Input`. The constructor's `spec/v1.Resource` has `AccessOrInput` supporting both. We can't import `constructor/spec/v1` from input specs because the constructor **module** depends on the input modules — creating a module-level cycle.
 
-The plugin contracts at `bindings/go/plugin/manager/contracts/input/v1/types.go` already model this pattern: request uses `*constructorv1.Resource` (with input), response uses `*descriptorv2.Resource` (with access). Our input transformation specs should follow the same model.
+The fix: extract `constructor/spec/v1` into its own Go module. The spec types only depend on `runtime`, `yaml`, and `jsonschema/v6` — making it a leaf module with no cycles.
+
+Additionally, the current spec structure is wrong: input-specific attributes (path, mediaType, etc.) sit as top-level fields alongside a `Resource` field. Instead, the spec should contain a `*constructorv1.Resource` whose `Input` field holds the input-specific attributes. The transformer deserializes `Resource.Input` to get the input config. Only transformer-specific concerns (workingDirectory, outputPath) remain as top-level spec fields.
 
 ## Steps
 
-### 1. Create `bindings/go/descriptor/v2/constructor/constructor.go`
+### 1. Create `bindings/go/constructor/spec/v1/go.mod`
 
-Copy types from `bindings/go/constructor/spec/v1/constructor.go` (425 lines). Include everything:
-- `ComponentConstructor`, `Component`, `Provider`, `Resource`, `Source`, `Reference`
-- `AccessOrInput` (the key type with both `Access` and `Input *runtime.Raw`)
-- `ConstructorAttributes`, `CopyPolicy` constants
-- `ElementMeta`, `ObjectMeta`, `ComponentMeta`, `Meta`
-- `Label`, `SourceRef`, `Digest`, `Signature`, `SignatureInfo`
-- `ResourceRelation` constants (`LocalRelation`, `ExternalRelation`)
-- All methods (`ToIdentity`, `HasInput`, `HasAccess`, `Validate`, `String`, etc.)
-- `AsRawMessage`, `MustAsRawMessage`
+New module: `ocm.software/open-component-model/bindings/go/constructor/spec/v1`
 
-Change package declaration from `package v1` to `package constructor`. Import path stays the same (`runtime`, `yaml`).
+Dependencies (matching what constructor.go + validate.go need):
+- `ocm.software/open-component-model/bindings/go/runtime`
+- `sigs.k8s.io/yaml`
+- `github.com/santhosh-tekuri/jsonschema/v6`
 
-### 2. Create `bindings/go/descriptor/v2/constructor/validate.go`
+### 2. Remove `convert.go` and `convert_test.go` from `spec/v1`
 
-Copy from `bindings/go/constructor/spec/v1/validate.go` (93 lines). Includes:
-- Embedded schema: `//go:embed resources/schema-2020-12.json`
-- `GetJSONSchema` singleton, `Compile()`, `Validate()`, `ValidateRawJSON()`, `ValidateRawYAML()`
+These functions are only called from spec/v1's own tests — no external callers. The same conversions already exist in `constructor/runtime/convert_v1.go`. Removing them keeps the new module's deps minimal (avoids pulling in `descriptor/runtime`).
 
-### 3. Copy `bindings/go/constructor/spec/v1/resources/schema-2020-12.json`
+### 3. Create `bindings/go/constructor/spec/v1/Taskfile.yml`
 
-Copy the 567-line JSON Schema file to `bindings/go/descriptor/v2/constructor/resources/schema-2020-12.json`.
+Standard Taskfile matching the pattern used by other modules (e.g., `descriptor/v2/Taskfile.yml`).
 
-### 4. Update `constructor/spec/v1` to re-export from new package
+### 4. Register in root `Taskfile.yml`
 
-Change `constructor/spec/v1/constructor.go` to type-alias everything from `descriptor/v2/constructor`:
+Add the new module's Taskfile include to the root Taskfile.
+
+### 5. Update `bindings/go/constructor/go.mod`
+
+Add `ocm.software/open-component-model/bindings/go/constructor/spec/v1` as a dependency.
+
+### 6. Restructure input transformation specs
+
+Replace the current pattern where input-specific fields sit alongside a `Resource` field with the new model where `Resource.Input` contains the input-specific attributes.
+
+**Before (FileInputSpec as example):**
 ```go
-import constructor "ocm.software/open-component-model/bindings/go/descriptor/v2/constructor"
-type Resource = constructor.Resource
-type AccessOrInput = constructor.AccessOrInput
-// ... etc for all types
+type FileInputSpec struct {
+    Resource         *v2.Resource `json:"resource,omitempty"`
+    Path             string       `json:"path"`
+    MediaType        string       `json:"mediaType,omitempty"`
+    Compress         bool         `json:"compress,omitempty"`
+    WorkingDirectory string       `json:"workingDirectory,omitempty"`
+    OutputPath       string       `json:"outputPath,omitempty"`
+}
 ```
 
-Keep `convert.go` as-is — it only uses the aliased types, so it'll work.
-Keep `validate.go` — delegate to the new package or keep both (the schema is the same).
+**After:**
+```go
+type FileInputSpec struct {
+    Resource         *constructorv1.Resource `json:"resource,omitempty"`
+    WorkingDirectory string                  `json:"workingDirectory,omitempty"`
+    OutputPath       string                  `json:"outputPath,omitempty"`
+}
+// Resource.Input contains {"type":"file/v1","path":"./foo.txt","mediaType":"text/plain","compress":false}
+```
 
-This preserves backward compatibility for all external consumers:
-- `cli/cmd/add/component-version/cmd.go`
-- `bindings/go/plugin/manager/contracts/input/v1/types.go`
-- `bindings/go/helm/cmd/main_test.go`
+Apply to all four specs:
+- `bindings/go/input/file/transformation/spec/v1alpha1/file_input.go` — FileInputSpec + FileInputOutput
+- `bindings/go/input/dir/transformation/spec/v1alpha1/dir_input.go` — DirInputSpec + DirInputOutput
+- `bindings/go/input/utf8/transformation/spec/v1alpha1/utf8_input.go` — UTF8InputSpec + UTF8InputOutput
+- `bindings/go/helm/input/transformation/spec/v1alpha1/helm_input.go` — HelmInputSpec + HelmInputOutput
 
-### 5. Change input transformation spec `Resource` fields
+Update each module's `go.mod` to add the new `constructor/spec/v1` dependency (and remove `descriptor/v2` if no longer needed).
 
-In all four input spec types, replace `*v2.Resource` with `*constructor.Resource`:
+### 7. Update all four transformers
 
-- `bindings/go/input/file/transformation/spec/v1alpha1/file_input.go` — `FileInputSpec.Resource` and `FileInputOutput.Resource`
-- `bindings/go/input/dir/transformation/spec/v1alpha1/dir_input.go` — `DirInputSpec.Resource` and `DirInputOutput.Resource`
-- `bindings/go/input/utf8/transformation/spec/v1alpha1/utf8_input.go` — `UTF8InputSpec.Resource` and `UTF8InputOutput.Resource`
-- `bindings/go/helm/input/transformation/spec/v1alpha1/helm_input.go` — `HelmInputSpec.Resource` and `HelmInputOutput.Resource`
+Each transformer must now extract input-specific config from `spec.Resource.Input` instead of reading top-level spec fields:
 
-Import: `constructor "ocm.software/open-component-model/bindings/go/descriptor/v2/constructor"`
+**File transformer** (`bindings/go/input/file/transformation/file_input.go`):
+- Deserialize `spec.Resource.Input` to get path, mediaType, compress
 
-### 6. Update HelmInput transformer
+**Dir transformer** (`bindings/go/input/dir/transformation/dir_input.go`):
+- Deserialize `spec.Resource.Input` to get path, mediaType, compress, preserveDir, followSymlinks, excludeFiles, includeFiles, reproducible
 
-`bindings/go/helm/input/transformation/helm_input.go:111` — change `createRemoteResource` return type from `*v2.Resource` to `*constructor.Resource`. Update the struct literal to use constructor types (`constructor.ElementMeta`, `constructor.Resource`, etc.) and set `Access` via `AccessOrInput`.
+**UTF8 transformer** (`bindings/go/input/utf8/transformation/utf8_input.go`):
+- Deserialize `spec.Resource.Input` to get text, json, formattedJson, yaml, compress
 
-### 7. Update `buildInputTransformation` in `input.go`
+**Helm transformer** (`bindings/go/helm/input/transformation/helm_input.go`):
+- Deserialize `spec.Resource.Input` to get path, repository, helmRepository, version, caCert, caCertFile
+- Update `createRemoteResource` return type from `*v2.Resource` to `*constructorv1.Resource`
+- Construct `constructorv1.Resource` with `AccessOrInput{Access: &rawAccess}` instead of `v2.Resource{Access: &rawAccess}`
 
-`bindings/go/constructor/internal/graph/input.go` — inject the serialized input spec into `resourceMap["input"]`. The `resourceMap` already has name/version/type/relation; now also gets `"input": <serialized input spec>`. This means input transformation specs carry the full resource including its input definition.
+### 8. Update `buildInputTransformation` in `input.go`
+
+`bindings/go/constructor/internal/graph/input.go` — change how the transformation spec is built:
+
+**Before:** resourceMap is injected as `inputMap["resource"]` alongside input-specific fields at the top level.
+
+**After:** Build the spec as `{"resource": <full constructorv1.Resource with input populated>}`. The resource already has the input embedded — just serialize it and wrap with workingDirectory/outputPath.
 
 Do NOT put input into `addResourceMap` — AddLocalResource still uses the `access` placeholder.
 
-### 8. Run `task generate` + `go mod tidy`
+### 9. Run `task generate` + `go mod tidy`
 
-Regenerate deepcopy, type registration, JSON schemas. Then `go mod tidy` for affected modules (descriptor/v2, input/file, input/dir, input/utf8, helm, constructor).
+Regenerate deepcopy, type registration, JSON schemas. Then `go mod tidy` for affected modules.
 
-### 9. Update tests
+### 10. Update tests
 
-Update `graph_test.go` assertions if needed for the new resource shape in input transformation specs.
+Update `graph_test.go` assertions for the new resource shape in input transformation specs.
 
 ## Key files
 
 **New:**
-- `bindings/go/descriptor/v2/constructor/constructor.go`
-- `bindings/go/descriptor/v2/constructor/validate.go`
-- `bindings/go/descriptor/v2/constructor/resources/schema-2020-12.json`
+- `bindings/go/constructor/spec/v1/go.mod`
+- `bindings/go/constructor/spec/v1/Taskfile.yml`
+
+**Removed:**
+- `bindings/go/constructor/spec/v1/convert.go`
+- `bindings/go/constructor/spec/v1/convert_test.go`
 
 **Modified:**
-- `bindings/go/constructor/spec/v1/constructor.go` → re-export via type aliases
-- `bindings/go/constructor/spec/v1/validate.go` → delegate to new package
-- `bindings/go/input/file/transformation/spec/v1alpha1/file_input.go`
-- `bindings/go/input/dir/transformation/spec/v1alpha1/dir_input.go`
-- `bindings/go/input/utf8/transformation/spec/v1alpha1/utf8_input.go`
-- `bindings/go/helm/input/transformation/spec/v1alpha1/helm_input.go`
-- `bindings/go/helm/input/transformation/helm_input.go`
-- `bindings/go/constructor/internal/graph/input.go`
-- `bindings/go/constructor/internal/graph/graph_test.go`
+- `Taskfile.yml` (root) — add new module include
+- `bindings/go/constructor/go.mod` — add spec/v1 module dep
+- `bindings/go/input/file/transformation/spec/v1alpha1/file_input.go` — restructure spec
+- `bindings/go/input/file/transformation/file_input.go` — read from Resource.Input
+- `bindings/go/input/file/go.mod` — add spec/v1 dep
+- `bindings/go/input/dir/transformation/spec/v1alpha1/dir_input.go` — restructure spec
+- `bindings/go/input/dir/transformation/dir_input.go` — read from Resource.Input
+- `bindings/go/input/dir/go.mod` — add spec/v1 dep
+- `bindings/go/input/utf8/transformation/spec/v1alpha1/utf8_input.go` — restructure spec
+- `bindings/go/input/utf8/transformation/utf8_input.go` — read from Resource.Input
+- `bindings/go/input/utf8/go.mod` — add spec/v1 dep
+- `bindings/go/helm/input/transformation/spec/v1alpha1/helm_input.go` — restructure spec
+- `bindings/go/helm/input/transformation/helm_input.go` — read from Resource.Input + update createRemoteResource
+- `bindings/go/helm/go.mod` — add spec/v1 dep
+- `bindings/go/constructor/internal/graph/input.go` — new serialization
+- `bindings/go/constructor/internal/graph/graph_test.go` — updated assertions
 
 ## Verification
 
 ```bash
+task init/go.work
 task generate
-# go mod tidy for each affected module
-go vet ./bindings/go/descriptor/v2/... ./bindings/go/constructor/... ./bindings/go/input/file/... ./bindings/go/input/dir/... ./bindings/go/input/utf8/... ./bindings/go/helm/...
-go test ./bindings/go/descriptor/v2/... ./bindings/go/constructor/... ./bindings/go/input/file/... ./bindings/go/input/dir/... ./bindings/go/input/utf8/... ./bindings/go/helm/...
+task tidy
+task tools:lint
+go test ./bindings/go/constructor/spec/v1/... ./bindings/go/constructor/... ./bindings/go/input/file/... ./bindings/go/input/dir/... ./bindings/go/input/utf8/... ./bindings/go/helm/...
 go run ./cli/main.go --working-directory /tmp/helloworld add cv --component-version-conflict-policy replace --dry-run
 ```

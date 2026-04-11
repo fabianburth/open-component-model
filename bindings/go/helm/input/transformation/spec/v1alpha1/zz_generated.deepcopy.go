@@ -6,7 +6,7 @@
 package v1alpha1
 
 import (
-	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
+	v1 "ocm.software/open-component-model/bindings/go/constructor/spec/v1"
 	runtime "ocm.software/open-component-model/bindings/go/runtime"
 )
 
@@ -51,7 +51,7 @@ func (in *HelmInputOutput) DeepCopyInto(out *HelmInputOutput) {
 	out.File = in.File
 	if in.Resource != nil {
 		in, out := &in.Resource, &out.Resource
-		*out = new(v2.Resource)
+		*out = new(v1.Resource)
 		(*in).DeepCopyInto(*out)
 	}
 	return
@@ -72,7 +72,7 @@ func (in *HelmInputSpec) DeepCopyInto(out *HelmInputSpec) {
 	*out = *in
 	if in.Resource != nil {
 		in, out := &in.Resource, &out.Resource
-		*out = new(v2.Resource)
+		*out = new(v1.Resource)
 		(*in).DeepCopyInto(*out)
 	}
 	return

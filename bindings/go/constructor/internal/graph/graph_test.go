@@ -129,14 +129,14 @@ func TestBuildGraphDefinition_SimpleComponent(t *testing.T) {
 	r.Nil(envData["meta"], "constructor format should not have meta")
 	r.Nil(envData["component"], "constructor format should not have component wrapper")
 
-	// Resource should preserve the input specification, not have a placeholder access
+	// Environment stores the constructor's v1 representation, which preserves input specs.
 	resources, ok := envData["resources"].([]any)
 	r.True(ok, "resources should be an array")
 	r.Len(resources, 1)
 	res, ok := resources[0].(map[string]any)
 	r.True(ok)
-	r.NotNil(res["input"], "resource should preserve input spec")
-	r.Nil(res["access"], "resource with input should not have a placeholder access")
+	r.NotNil(res["input"], "resource should preserve input spec in environment")
+	r.Nil(res["access"], "resource with input should not have access in environment")
 }
 
 func TestBuildGraphDefinition_ComponentWithSource(t *testing.T) {
@@ -580,11 +580,11 @@ func TestBuildGraphDefinition_MixedInputAndAccessResources(t *testing.T) {
 	r.True(ok)
 	r.Len(resources, 2)
 
-	// First resource (input-based) should have input, no access
+	// First resource (input-based) should have input in environment, no access
 	inputRes, ok := resources[0].(map[string]any)
 	r.True(ok)
-	r.NotNil(inputRes["input"], "input resource should preserve input spec")
-	r.Nil(inputRes["access"], "input resource should not have access")
+	r.NotNil(inputRes["input"], "input resource should preserve input spec in environment")
+	r.Nil(inputRes["access"], "input resource should not have access in environment")
 
 	// Second resource (access-based) should have access, no input
 	accessRes, ok := resources[1].(map[string]any)

@@ -3,6 +3,7 @@ package graph
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 
 	constructor "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	ociv1alpha1 "ocm.software/open-component-model/bindings/go/oci/spec/transformation/v1alpha1"
@@ -52,7 +53,6 @@ func processResourceTransformations(
 			"version":  resourceVersion,
 			"type":     resource.Type,
 			"relation": "local",
-			"access":   map[string]any{"type": "localBlob/v1"},
 		}
 		if resource.ExtraIdentity != nil {
 			resourceMap["extraIdentity"] = resource.ExtraIdentity
@@ -94,6 +94,12 @@ func processResourceTransformations(
 			return "", fmt.Errorf("choosing add local resource type: %w", err)
 		}
 
+		// Build the AddLocalResource resource map with a localBlob access placeholder.
+		// The actual access spec is populated by the repository implementation during upload.
+		addResourceMap := make(map[string]any, len(resourceMap)+1)
+		maps.Copy(addResourceMap, resourceMap)
+		addResourceMap["access"] = map[string]any{"type": "localBlob/v1"}
+
 		addTransform := transformv1alpha1.GenericTransformation{
 			TransformationMeta: meta.TransformationMeta{
 				Type: addLocalResourceType,
@@ -103,7 +109,7 @@ func processResourceTransformations(
 				"repository": toRepo.Data,
 				"component":  component,
 				"version":    version,
-				"resource":   resourceMap,
+				"resource":   addResourceMap,
 				"file":       fmt.Sprintf("${%s.output.file}", inputID),
 			}},
 		}

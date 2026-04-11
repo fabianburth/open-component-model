@@ -1,4 +1,4 @@
-module ocm.software/open-component-model/bindings/go/transfer/integration
+module ocm.software/open-component-model/bindings/go/graph/transfer/integration
 
 go 1.26.1
 

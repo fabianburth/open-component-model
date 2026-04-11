@@ -465,7 +465,7 @@ All previous concerns about merging are resolved:
 
 **Changes:**
 
-1. **Rename `constructor/spec/v1` → `constructor/v2`** (new module path: `ocm.software/.../constructor/v2`). The constructor format is based on the v2 descriptor schema. The existing `constructor/spec/v1` module continues to exist as an alias/redirect during transition.
+1. **Rename `constructor/spec/v1` → `constructor/v2`** (new module path: `ocm.software/.../constructor/v2`). The constructor format is based on the v2 descriptor schema. Hard rename — update all importers in one shot, no redirect module.
 
 2. **Extract `constructor/runtime` into its own module** (new module path: `ocm.software/.../constructor/runtime`). Contains:
    - Runtime types: `Component`, `Resource`, `Source`, `AccessOrInput`, `Reference`, `Digest`, `Label`, `CopyPolicy`, etc.
@@ -541,7 +541,7 @@ func (t *FileInput) Transform(ctx context.Context, step runtime.Typed) (runtime.
 
 ### Implementation Note: Go Workspace for Unpublished Modules
 
-Phase 3 introduces new modules (`constructor/v2`, `constructor/runtime`, `graph/`) that will not be published to a module proxy at the time of implementation. The Go workspace (`go.work`) must include the new module directories so that local resolution works without published versions.
+Phase 2 introduces new modules (`constructor/v2`, `constructor/runtime`, `graph/`) that will not be published to a module proxy at the time of implementation. The Go workspace (`go.work`) must include the new module directories so that local resolution works without published versions.
 
 Use `task init/go.work` to regenerate the workspace after creating new modules. The workspace ensures `go build` and `go test` resolve all local modules against each other. Note that `go mod tidy` does **not** respect the workspace — it resolves against the module proxy and will fail for unpublished modules. Defer `task tidy` until the new modules are published.
 
@@ -552,34 +552,41 @@ Use `task init/go.work` to regenerate the workspace after creating new modules. 
 | 1 | C-1 | Fix `source.go:94` to use `${inputID.output.source}` | Small |
 | 2 | C-6 | Publish AddLocalSource constants in `ociv1alpha1` | Small |
 
-### Phase 2: Inline Static Data + Shared Utilities (Short-term)
+### Phase 2: Module Restructuring (Short-term, before other refactors)
+
+Module restructuring comes first to avoid touching the same code twice — subsequent phases operate on code in its final location.
 
 | # | Issue | Action | Effort |
 |---|-------|--------|--------|
-| 3 | M-1/M-2/C-5 | Stop using environment in generators per Strategy 1 — inline static data, delete all `buildDescriptorSpec` variants, `addXToEnvironment` functions | Large |
-| 4 | C-3/C-4 | Create shared `graphutil` package per Strategy 2 | Medium |
-| 5 | C-2 | Include `ConvertToConcreteRepo` in shared package | Small (bundled with #4) |
+| 3 | A-2 | Rename `constructor/spec/v1` → `constructor/v2` — hard rename, update all importers in one shot | Small |
+| 4 | A-2 | Extract `constructor/runtime` into its own module with library interfaces per Strategy 4 | Medium |
+| 5 | A-2 | Create `bindings/go/graph/` module (`ocm.software/.../graph`), merge construct + transfer graph generation per Strategy 4 — includes deduplicating shared helpers (C-2, C-3, C-4) during the merge | Large |
+| 6 | A-2 | Drop duplicate `ResourceDigestProcessor`, delete old `constructor` and `transfer` root modules | Small |
 
-### Phase 3: Module Restructuring + Input Library Layer (Medium-term)
+### Phase 3: Inline Static Data (Short-term, after restructure)
 
-| # | Issue | Action | Effort |
-|---|-------|--------|--------|
-| 6 | A-2 | Rename `constructor/spec/v1` → `constructor/v2` per Strategy 4 | Small |
-| 7 | A-2 | Extract `constructor/runtime` into its own module with library interfaces per Strategy 4 | Medium |
-| 8 | A-2 | Create `bindings/go/graph/` module, merge construct + transfer graph generation per Strategy 4 | Large |
-| 9 | A-2 | Drop duplicate `ResourceDigestProcessor`, delete old `constructor` and `transfer` root modules | Small |
-| 10 | A-1 | Restore `InputMethod` types in `input/file`, `input/dir`, `input/utf8`, `helm/input` per Strategy 5 | Medium |
-| 11 | A-1 | Refactor transformers (`FileInput`, `DirInput`, `UTF8Input`, `HelmInput`) to delegate to restored `InputMethod` | Medium |
-
-### Phase 4: Remaining Alignment (Medium-term)
+Operates on code already in `graph/construct` and `graph/transfer`.
 
 | # | Issue | Action | Effort |
 |---|-------|--------|--------|
-| 12 | M-4 | Adapt constructor's resolver to wrap `ComponentVersionRepositoryResolver` | Medium |
+| 7 | M-1/M-2/C-5 | Stop using environment in generators per Strategy 1 — inline static data, delete all `buildDescriptorSpec` variants, `addXToEnvironment` functions | Large |
 
-### Phase 5: Feature Parity (Long-term)
+### Phase 4: Input Library Layer (Medium-term)
 
 | # | Issue | Action | Effort |
 |---|-------|--------|--------|
-| 13 | M-3 | Digest processing in transfer (Strategy 6) | Large |
-| 14 | TODO | By-value resource processing in constructor (`input.go:119`) | Large |
+| 8 | A-1 | Restore `InputMethod` types in `input/file`, `input/dir`, `input/utf8`, `helm/input` per Strategy 5 | Medium |
+| 9 | A-1 | Refactor transformers (`FileInput`, `DirInput`, `UTF8Input`, `HelmInput`) to delegate to restored `InputMethod` | Medium |
+
+### Phase 5: Remaining Alignment (Medium-term)
+
+| # | Issue | Action | Effort |
+|---|-------|--------|--------|
+| 10 | M-4 | Adapt constructor's resolver to wrap `ComponentVersionRepositoryResolver` | Medium |
+
+### Phase 6: Feature Parity (Long-term)
+
+| # | Issue | Action | Effort |
+|---|-------|--------|--------|
+| 11 | M-3 | Digest processing in transfer (Strategy 6) | Large |
+| 12 | TODO | By-value resource processing in constructor (`input.go:119`) | Large |

@@ -636,6 +636,10 @@
               "$ref": "#/$defs/nonEmptyString",
               "description": "Algorithm used for signing"
             },
+            "issuer": {
+              "$ref": "#/$defs/nonEmptyString",
+              "description": "Optionally identifies the signer of the signature. Values can be an RFC2253 Distinguished Name (DN) string, or a free-form string identifier for the signing authority."
+            },
             "mediaType": {
               "$ref": "#/$defs/nonEmptyString",
               "description": "Media type of the signature value"

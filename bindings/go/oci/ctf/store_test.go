@@ -389,7 +389,8 @@ func TestTags(t *testing.T) {
 			return nil
 		})
 		assert.NoError(t, err)
-		assert.ElementsMatch(t, []string{"tag1", "tag2"}, tags, "multiple tags for the same digest should coexist")
+		// Like OCI Image Layout, multiple tags can point to the same digest
+		assert.ElementsMatch(t, []string{"tag1", "tag2"}, tags, "multiple tags for same digest should coexist")
 	})
 }
 

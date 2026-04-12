@@ -61,13 +61,12 @@ func (t *HelmInput) Transform(ctx context.Context, step runtime.Typed) (runtime.
 	// Resolve credentials if credential provider is available
 	var creds map[string]string
 	if t.CredentialProvider != nil {
-		identity, err := method.GetResourceCredentialConsumerIdentity(ctx, resource)
-		if err == nil && identity != nil {
-			resolved, err := t.CredentialProvider.Resolve(ctx, identity)
-			if err != nil && !errors.Is(err, credentials.ErrNotFound) {
-				return nil, fmt.Errorf("failed resolving credentials for helm repository: %w", err)
+		if consumerId, err := method.GetResourceCredentialConsumerIdentity(ctx, resource); err != nil {
+			return nil, fmt.Errorf("failed getting resource consumer identity for credential resolution: %w", err)
+		} else if consumerId != nil {
+			if creds, err = t.CredentialProvider.Resolve(ctx, consumerId); err != nil && !errors.Is(err, credentials.ErrNotFound) {
+				return nil, fmt.Errorf("failed resolving credentials: %w", err)
 			}
-			creds = resolved
 		}
 	}
 

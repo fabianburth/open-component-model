@@ -7,6 +7,7 @@ import (
 
 	constructorruntime "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	descriptor "ocm.software/open-component-model/bindings/go/descriptor/runtime"
+	"ocm.software/open-component-model/bindings/go/helm/internal"
 	v1 "ocm.software/open-component-model/bindings/go/helm/input/spec/v1"
 	"ocm.software/open-component-model/bindings/go/oci/looseref"
 	access "ocm.software/open-component-model/bindings/go/oci/spec/access"
@@ -37,16 +38,7 @@ func (i *InputMethod) GetResourceCredentialConsumerIdentity(_ context.Context, r
 		return nil, fmt.Errorf("error converting resource input spec: %w", err)
 	}
 
-	if helm.HelmRepository == "" {
-		return nil, nil
-	}
-
-	identity, err := runtime.ParseURLToIdentity(helm.HelmRepository)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing helm repository URL to identity: %w", err)
-	}
-
-	return identity, nil
+	return internal.ConsumerIdentityFromURL(helm.HelmRepository)
 }
 
 func (i *InputMethod) ProcessResource(ctx context.Context, resource *constructorruntime.Resource, credentials map[string]string) (*constructorruntime.ResourceInputMethodResult, error) {

@@ -28,6 +28,10 @@ on:
         description: "The ref to build on (branch or tag). Defaults to the current ref."
         type: string
         required: false
+      build_version:
+        description: "Version to embed in binary (overrides computed version for ldflags only). Leading 'v' is stripped."
+        type: string
+        required: false
     outputs:
       artifact_name:
         description: "The artifact name that was built."
@@ -91,7 +95,7 @@ jobs:
 
       # Setup Docker Buildx for multi-arch and advanced image building
       - name: Setup docker/buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
 
       # Compute VERSION from env.REF
       - name: Compute VERSION
@@ -109,8 +113,12 @@ jobs:
       # make sure that the version doesn't contain invalid semver characters
       - name: Generate & Verify CTF
         run: |
-          task cli:generate/ctf VERSION="${VERSION}"
+          BUILD_VERSION="${BUILD_VERSION_OVERRIDE:-$VERSION}"
+          BUILD_VERSION="${BUILD_VERSION#v}"
+          task cli:generate/ctf VERSION="${VERSION}" BUILD_VERSION="${BUILD_VERSION}"
           task cli:verify/ctf
+        env:
+          BUILD_VERSION_OVERRIDE: ${{ inputs.build_version }}
 
       # Attest built binaries with provenance metadata, but only if we're not on a PR
       - name: Attest binaries
@@ -189,7 +197,7 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}

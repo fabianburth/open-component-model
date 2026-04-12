@@ -6,10 +6,12 @@ import (
 	helmtransformer "ocm.software/open-component-model/bindings/go/helm/transformation"
 	helmv1alpha1 "ocm.software/open-component-model/bindings/go/helm/transformation/spec/v1alpha1"
 	ociaccess "ocm.software/open-component-model/bindings/go/oci/spec/access"
-	ociv1alpha1 "ocm.software/open-component-model/bindings/go/oci/transformation/spec/v1alpha1"
 	ocitransformation "ocm.software/open-component-model/bindings/go/oci/transformation"
+	ociv1alpha1 "ocm.software/open-component-model/bindings/go/oci/transformation/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/repository"
 	"ocm.software/open-component-model/bindings/go/runtime"
+	signingtransformation "ocm.software/open-component-model/bindings/go/signing/transformation"
+	signingv1alpha1 "ocm.software/open-component-model/bindings/go/signing/transformation/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/transform/graph/builder"
 )
 
@@ -25,6 +27,7 @@ func NewDefaultBuilder(
 	transformerScheme.MustRegisterScheme(ociv1alpha1.Scheme)
 	transformerScheme.MustRegisterScheme(ociaccess.Scheme)
 	transformerScheme.MustRegisterScheme(helmv1alpha1.Scheme)
+	transformerScheme.MustRegisterScheme(signingv1alpha1.Scheme)
 
 	ociGet := &ocitransformation.GetComponentVersion{
 		Scheme:             transformerScheme,
@@ -72,6 +75,9 @@ func NewDefaultBuilder(
 		Scheme: transformerScheme,
 	}
 
+	// Signing transformers
+	computeDigest := &signingtransformation.ComputeComponentDigest{Scheme: transformerScheme}
+
 	return builder.NewBuilder(transformerScheme).
 		WithTransformer(&ociv1alpha1.OCIGetComponentVersion{}, ociGet).
 		WithTransformer(&ociv1alpha1.OCIAddComponentVersion{}, ociAdd).
@@ -84,5 +90,6 @@ func NewDefaultBuilder(
 		WithTransformer(&ociv1alpha1.GetOCIArtifact{}, ociGetOCIArtifact).
 		WithTransformer(&ociv1alpha1.AddOCIArtifact{}, ociAddOCIArtifact).
 		WithTransformer(&helmv1alpha1.GetHelmChart{}, getHelmChart).
-		WithTransformer(&helmv1alpha1.ConvertHelmToOCI{}, convertHelmToOCI)
+		WithTransformer(&helmv1alpha1.ConvertHelmToOCI{}, convertHelmToOCI).
+		WithTransformer(&signingv1alpha1.ComputeComponentDigest{}, computeDigest)
 }

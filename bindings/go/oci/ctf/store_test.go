@@ -389,7 +389,7 @@ func TestTags(t *testing.T) {
 			return nil
 		})
 		assert.NoError(t, err)
-		assert.ElementsMatch(t, []string{"tag2"}, tags, "a retag should not return the old tag")
+		assert.ElementsMatch(t, []string{"tag1", "tag2"}, tags, "multiple tags for the same digest should coexist")
 	})
 }
 

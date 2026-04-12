@@ -2,6 +2,7 @@ package file
 
 import (
 	"fmt"
+	"log/slog"
 
 	"github.com/gabriel-vasile/mimetype"
 
@@ -49,7 +50,12 @@ func GetV1FileBlob(file v1.File, workingDirectory string) (blob.ReadOnlyBlob, er
 		return nil, fmt.Errorf("file path must not be empty")
 	}
 
-	b, err := filesystem.GetBlobInWorkingDirectory(file.Path, workingDirectory)
+	resolvedPath, err := filesystem.EnsurePathInWorkingDirectory(file.Path, workingDirectory)
+	if err != nil {
+		return nil, fmt.Errorf("unable to resolve file path: %w", err)
+	}
+
+	b, err := filesystem.GetBlobFromOSPath(resolvedPath)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +63,10 @@ func GetV1FileBlob(file v1.File, workingDirectory string) (blob.ReadOnlyBlob, er
 	mediaType := file.MediaType
 	if mediaType == "" {
 		// see https://github.com/gabriel-vasile/mimetype/blob/master/supported_mimes.md for supported types
-		mime, _ := mimetype.DetectFile(file.Path)
+		mime, err := mimetype.DetectFile(resolvedPath)
+		if err != nil {
+			slog.Debug("failed to detect media type from file, defaulting to detected fallback", "filepath", resolvedPath, "error", err)
+		}
 		mediaType = mime.String()
 	}
 

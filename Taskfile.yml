@@ -16,14 +16,10 @@ includes:
     optional: true
     taskfile: ./bindings/go/credentials/Taskfile.yml
     dir: ./bindings/go/credentials
-  bindings/go/constructor/runtime:
+  bindings/go/constructor:
     optional: true
-    taskfile: ./bindings/go/constructor/runtime/Taskfile.yml
-    dir: ./bindings/go/constructor/runtime
-  bindings/go/constructor/v1:
-    optional: true
-    taskfile: ./bindings/go/constructor/v1/Taskfile.yml
-    dir: ./bindings/go/constructor/v1
+    taskfile: ./bindings/go/constructor/Taskfile.yml
+    dir: ./bindings/go/constructor
   bindings/go/input/dir:
     optional: true
     taskfile: ./bindings/go/input/dir/Taskfile.yml

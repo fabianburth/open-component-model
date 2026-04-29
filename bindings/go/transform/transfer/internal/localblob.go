@@ -7,7 +7,7 @@ import (
 	ociv1 "ocm.software/open-component-model/bindings/go/oci/spec/access/v1"
 	ocirepo "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/oci"
 	ociv1alpha1 "ocm.software/open-component-model/bindings/go/oci/transformation/spec/v1alpha1"
-	graphinternal "ocm.software/open-component-model/bindings/go/graph/internal"
+	graphinternal "ocm.software/open-component-model/bindings/go/transform/internal"
 	"ocm.software/open-component-model/bindings/go/runtime"
 	transformv1alpha1 "ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1/meta"

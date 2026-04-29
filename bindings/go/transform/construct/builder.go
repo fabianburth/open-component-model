@@ -1,7 +1,7 @@
 package construct
 
 import (
-	graph "ocm.software/open-component-model/bindings/go/graph/construct/internal"
+	graph "ocm.software/open-component-model/bindings/go/transform/construct/internal"
 	"ocm.software/open-component-model/bindings/go/credentials"
 	"ocm.software/open-component-model/bindings/go/repository"
 	"ocm.software/open-component-model/bindings/go/transform/graph/builder"

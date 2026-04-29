@@ -620,17 +620,18 @@ bindings/go/
 ├── constructor/                ← domain model only (mirrors descriptor/)
 │   ├── v1/        (module)     ← serialization format
 │   └── runtime/   (module)     ← runtime types + library interfaces
-├── graph/         (module)     ← graph generation (merged construct + transfer)
-│   ├── construct/              ← BuildGraphDefinition for component construction
-│   ├── transfer/               ← BuildGraphDefinition for component transfer
-│   │   └── integration/        ← transfer integration tests
-│   ├── internal/               ← shared helpers (identityToTransformationID, etc.)
-│   └── ...
 ├── signing/                    ← signing + digest computation
 │   └── transformation/         ← ComputeComponentDigest transformer + spec
 ├── oci/
 │   └── transformation/         ← OCI/CTF transformers + spec (aligned layout)
-├── transform/     (module)     ← shared graph engine (CEL, DAG, builder)
+├── transform/     (module)     ← graph engine + graph generation (construct + transfer)
+│   ├── construct/              ← BuildGraphDefinition for component construction
+│   ├── transfer/               ← BuildGraphDefinition for component transfer
+│   │   └── integration/        ← transfer integration tests
+│   ├── internal/               ← shared helpers (identityToTransformationID, etc.)
+│   ├── graph/                  ← graph engine (CEL, DAG, builder, runtime)
+│   ├── spec/                   ← TransformationGraphDefinition spec
+│   └── ...
 ├── repository/    (module)     ← access-type library abstractions
 ├── ...
 ```

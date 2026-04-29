@@ -41,7 +41,7 @@ import (
 	"ocm.software/open-component-model/bindings/go/repository"
 	"ocm.software/open-component-model/bindings/go/runtime"
 
-	"ocm.software/open-component-model/bindings/go/graph/transfer"
+	"ocm.software/open-component-model/bindings/go/transform/transfer"
 )
 
 const (

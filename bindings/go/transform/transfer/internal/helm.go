@@ -5,7 +5,7 @@ import (
 
 	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	helmv1alpha1 "ocm.software/open-component-model/bindings/go/helm/transformation/spec/v1alpha1"
-	graphinternal "ocm.software/open-component-model/bindings/go/graph/internal"
+	graphinternal "ocm.software/open-component-model/bindings/go/transform/internal"
 	"ocm.software/open-component-model/bindings/go/runtime"
 	transformv1alpha1 "ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1/meta"

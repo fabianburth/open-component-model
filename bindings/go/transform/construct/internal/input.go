@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"maps"
 
-	graphinternal "ocm.software/open-component-model/bindings/go/graph/internal"
+	graphinternal "ocm.software/open-component-model/bindings/go/transform/internal"
 	constructor "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	ociv1alpha1 "ocm.software/open-component-model/bindings/go/oci/transformation/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/runtime"

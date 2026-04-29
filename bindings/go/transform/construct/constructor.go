@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	graph "ocm.software/open-component-model/bindings/go/graph/construct/internal"
+	graph "ocm.software/open-component-model/bindings/go/transform/construct/internal"
 	constructor "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	transformv1alpha1 "ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1"
 )

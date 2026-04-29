@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"os"
 
-	graphinternal "ocm.software/open-component-model/bindings/go/graph/internal"
+	graphinternal "ocm.software/open-component-model/bindings/go/transform/internal"
 	"ocm.software/open-component-model/bindings/go/blob"
 	constructor "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	signingv1alpha1 "ocm.software/open-component-model/bindings/go/signing/transformation/spec/v1alpha1"

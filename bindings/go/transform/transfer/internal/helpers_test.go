@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	graphinternal "ocm.software/open-component-model/bindings/go/graph/internal"
+	graphinternal "ocm.software/open-component-model/bindings/go/transform/internal"
 	ociv1 "ocm.software/open-component-model/bindings/go/oci/spec/access/v1"
 	ctfv1 "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/ctf"
 	"ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/oci"

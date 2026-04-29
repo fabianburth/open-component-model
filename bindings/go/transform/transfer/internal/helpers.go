@@ -6,7 +6,7 @@ import (
 
 	ocispecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 
-	graphinternal "ocm.software/open-component-model/bindings/go/graph/internal"
+	graphinternal "ocm.software/open-component-model/bindings/go/transform/internal"
 	"ocm.software/open-component-model/bindings/go/oci/looseref"
 	ctfv1 "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/ctf"
 	"ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/oci"

@@ -3,7 +3,7 @@ package internal
 import (
 	"fmt"
 
-	graphinternal "ocm.software/open-component-model/bindings/go/graph/internal"
+	graphinternal "ocm.software/open-component-model/bindings/go/transform/internal"
 	constructor "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	"ocm.software/open-component-model/bindings/go/runtime"
 	transformv1alpha1 "ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1"

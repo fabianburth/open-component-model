@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	descriptor "ocm.software/open-component-model/bindings/go/descriptor/runtime"
-	graphinternal "ocm.software/open-component-model/bindings/go/graph/internal"
+	graphinternal "ocm.software/open-component-model/bindings/go/transform/internal"
 	"ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/oci"
 	"ocm.software/open-component-model/bindings/go/repository"
 	"ocm.software/open-component-model/bindings/go/repository/component/resolvers"

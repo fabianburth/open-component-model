@@ -3,7 +3,7 @@ package transfer
 import (
 	"ocm.software/open-component-model/bindings/go/credentials"
 	"ocm.software/open-component-model/bindings/go/repository"
-	"ocm.software/open-component-model/bindings/go/graph/transfer/internal"
+	"ocm.software/open-component-model/bindings/go/transform/transfer/internal"
 	"ocm.software/open-component-model/bindings/go/transform/graph/builder"
 )
 

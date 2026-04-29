@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	graphinternal "ocm.software/open-component-model/bindings/go/graph/internal"
+	graphinternal "ocm.software/open-component-model/bindings/go/transform/internal"
 	"ocm.software/open-component-model/bindings/go/dag"
 	dagsync "ocm.software/open-component-model/bindings/go/dag/sync"
 	descruntime "ocm.software/open-component-model/bindings/go/descriptor/runtime"

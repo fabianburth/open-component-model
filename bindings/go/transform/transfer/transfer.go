@@ -7,7 +7,7 @@ import (
 
 	"ocm.software/open-component-model/bindings/go/repository/component/resolvers"
 	"ocm.software/open-component-model/bindings/go/runtime"
-	"ocm.software/open-component-model/bindings/go/graph/transfer/internal"
+	"ocm.software/open-component-model/bindings/go/transform/transfer/internal"
 	transformv1alpha1 "ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1"
 )
 

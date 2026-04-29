@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"ocm.software/open-component-model/bindings/go/blob"
-	graph "ocm.software/open-component-model/bindings/go/graph/construct/internal"
+	graph "ocm.software/open-component-model/bindings/go/transform/construct/internal"
 	constructor "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	descriptor "ocm.software/open-component-model/bindings/go/descriptor/runtime"
 	"ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/oci"

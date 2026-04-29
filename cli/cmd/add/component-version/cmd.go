@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
 
-	"ocm.software/open-component-model/bindings/go/graph/construct"
+	"ocm.software/open-component-model/bindings/go/transform/construct"
 	constructorruntime "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/v1"
 	"ocm.software/open-component-model/bindings/go/oci/compref"

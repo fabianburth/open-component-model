@@ -54,7 +54,7 @@ import (
 	ocirepospecv1 "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/oci"
 	"ocm.software/open-component-model/bindings/go/oci/transformation/spec/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/oci/tar"
-	"ocm.software/open-component-model/bindings/go/oci/transformation"
+	transformer "ocm.software/open-component-model/bindings/go/oci/transformation"
 	"ocm.software/open-component-model/bindings/go/repository"
 	ocmruntime "ocm.software/open-component-model/bindings/go/runtime"
 )

@@ -13,7 +13,6 @@ import (
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
 
-	"ocm.software/open-component-model/bindings/go/transform/construct"
 	constructorruntime "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	constructorv1 "ocm.software/open-component-model/bindings/go/constructor/v1"
 	"ocm.software/open-component-model/bindings/go/oci/compref"
@@ -22,6 +21,8 @@ import (
 	ociv1 "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/oci"
 	"ocm.software/open-component-model/bindings/go/repository"
 	"ocm.software/open-component-model/bindings/go/runtime"
+	"ocm.software/open-component-model/bindings/go/transform/construct"
+	graphPkg "ocm.software/open-component-model/bindings/go/transform/graph"
 	graphRuntime "ocm.software/open-component-model/bindings/go/transform/graph/runtime"
 	transformv1alpha1 "ocm.software/open-component-model/bindings/go/transform/spec/v1alpha1"
 	"ocm.software/open-component-model/cli/cmd/setup"
@@ -30,6 +31,8 @@ import (
 	"ocm.software/open-component-model/cli/internal/flags/file"
 	"ocm.software/open-component-model/cli/internal/flags/log"
 	"ocm.software/open-component-model/cli/internal/render"
+	"ocm.software/open-component-model/cli/internal/render/progress"
+	"ocm.software/open-component-model/cli/internal/render/progress/bar"
 	"ocm.software/open-component-model/cli/internal/repository/ocm"
 )
 
@@ -426,16 +429,21 @@ func AddComponentVersion(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	// Create event channel and tracker
-	tracker := newProgressTracker(graph, cmd.OutOrStdout())
-	go tracker.Start(ctx)
+	// Execute graph with progress tracking
+	tracker := progress.NewTracker(ctx, cmd.ErrOrStderr(), bar.NewVisualizer[*graphPkg.Transformation])
+	defer tracker.Stop()
 
-	// Execute graph
+	op := tracker.StartOperation("Constructing component versions",
+		progress.WithEvents(graph.Events(), mapEvent, graph.NodeCount()),
+		progress.WithErrorFormatter(formatError))
+
 	if err := graph.Process(ctx); err != nil {
-		tracker.Summary(err)
+		op.Finish(err)
 		return fmt.Errorf("construction failed: %w", err)
 	}
-	tracker.Summary(nil)
+	op.Finish(nil)
+
+	tracker.Stop()
 
 	slog.DebugContext(ctx, "construction completed successfully")
 	return nil

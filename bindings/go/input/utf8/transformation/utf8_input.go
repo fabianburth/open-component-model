@@ -34,7 +34,7 @@ func (t *UTF8Input) Transform(ctx context.Context, step runtime.Typed) (runtime.
 		return nil, fmt.Errorf("resource with input is required for utf8 input transformation")
 	}
 
-	method := utf8pkg.NewInputMethod()
+	method := &utf8pkg.InputMethod{}
 
 	result, err := method.ProcessResource(ctx, &constructorruntime.Resource{
 		AccessOrInput: constructorruntime.AccessOrInput{

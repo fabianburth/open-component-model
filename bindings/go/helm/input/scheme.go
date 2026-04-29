@@ -1,7 +1,7 @@
 package input
 
 import (
-	v1 "ocm.software/open-component-model/bindings/go/helm/input/spec/v1"
+	v1 "ocm.software/open-component-model/bindings/go/helm/spec/input/v1"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 

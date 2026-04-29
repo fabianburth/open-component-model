@@ -11,10 +11,10 @@ import (
 
 	"ocm.software/open-component-model/bindings/go/blob"
 	"ocm.software/open-component-model/bindings/go/blob/filesystem"
-	v1 "ocm.software/open-component-model/bindings/go/helm/input/spec/v1"
 	"ocm.software/open-component-model/bindings/go/helm/internal"
 	dlinternal "ocm.software/open-component-model/bindings/go/helm/internal/download"
 	"ocm.software/open-component-model/bindings/go/helm/internal/oci"
+	"ocm.software/open-component-model/bindings/go/helm/spec/input/v1"
 )
 
 const (
@@ -47,16 +47,8 @@ func WithCredentials(credentials map[string]string) Option {
 	}
 }
 
-// WithWorkingDirectory sets the base directory for resolving relative paths.
-func WithWorkingDirectory(dir string) Option {
-	return func(options *Options) {
-		options.WorkingDirectory = dir
-	}
-}
-
 type Options struct {
-	Credentials      map[string]string
-	WorkingDirectory string
+	Credentials map[string]string
 }
 
 // GetV1HelmBlob creates a ReadOnlyBlob from a v1.Helm specification.
@@ -78,7 +70,7 @@ func GetV1HelmBlob(ctx context.Context, helmSpec v1.Helm, tmpDir string, opts ..
 
 	switch {
 	case helmSpec.Path != "":
-		chart, err = newReadOnlyChart(helmSpec.Path, tmpDir, options.WorkingDirectory)
+		chart, err = newReadOnlyChart(helmSpec.Path, tmpDir)
 		if err != nil {
 			return nil, nil, fmt.Errorf("error loading local helm chart %q: %w", helmSpec.Path, err)
 		}
@@ -118,15 +110,7 @@ func validateInputSpec(helmSpec v1.Helm) error {
 	return err
 }
 
-func newReadOnlyChart(path, tmpDirBase string, workingDirectory string) (result *ReadOnlyChart, err error) {
-	// Resolve the path against the working directory if specified
-	if workingDirectory != "" {
-		path, err = filesystem.EnsurePathInWorkingDirectory(path, workingDirectory)
-		if err != nil {
-			return nil, fmt.Errorf("error resolving helm chart path %q in working directory %q: %w", path, workingDirectory, err)
-		}
-	}
-
+func newReadOnlyChart(path, tmpDirBase string) (result *ReadOnlyChart, err error) {
 	// Load the chart from filesystem, the path can be either a helm chart directory or a tgz file.
 	// While loading the chart is also validated.
 	chart, err := loader.Load(path)

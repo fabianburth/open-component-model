@@ -4,82 +4,133 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 
+	"ocm.software/open-component-model/bindings/go/constructor"
 	constructorruntime "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	v1 "ocm.software/open-component-model/bindings/go/input/dir/spec/v1"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 
+// ErrDirsDoNotRequireCredentials is returned when credential-related operations are attempted
+// on directory inputs, since directories are accessed directly from the local filesystem and do not
+// require authentication or authorization.
 var ErrDirsDoNotRequireCredentials = fmt.Errorf("directories do not require credentials")
 
 var _ interface {
-	constructorruntime.ResourceInputMethod
-	constructorruntime.SourceInputMethod
+	constructor.ResourceInputMethod
+	constructor.SourceInputMethod
 } = (*InputMethod)(nil)
 
-// InputMethod processes directory input specifications into blobs.
+var Scheme = runtime.NewScheme()
+
+func init() {
+	Scheme.MustRegisterWithAlias(&v1.Dir{},
+		runtime.NewVersionedType(v1.Type, v1.Version),
+		runtime.NewUnversionedType(v1.Type),
+		runtime.NewVersionedType(v1.LegacyType, v1.Version),
+		runtime.NewUnversionedType(v1.LegacyType),
+	)
+}
+
+// InputMethod implements the ResourceInputMethod and SourceInputMethod interfaces
+// for dir-based inputs. It provides functionality to process directories from the local
+// filesystem as either resources or sources in the OCM constructor system.
+//
+// The InputMethod handles:
+//   - Converting input specifications to v1.Dir format
+//   - Reading directories from the filesystem
+//   - Processing directory metadata and content
+//   - Returning processed blob data for further use
+//
+// Since directories are accessed directly from the local filesystem, no credentials
+// are required for any operations.
 type InputMethod struct {
+	// WorkingDirectory is the base directory used to resolve relative paths in input specifications.
+	// If a path in the input specification is relative, it will be resolved against this directory.
 	WorkingDirectory string
 }
 
-// NewInputMethod creates a new InputMethod with the given working directory.
-// If workingDir is empty, the current working directory is used.
+// NewInputMethod creates a new InputMethod instance with the specified working directory.
+// The working directory is used to resolve relative paths in input specifications.
+// If the working directory is empty, it defaults to the current working directory of the process.
 func NewInputMethod(workingDir string) (*InputMethod, error) {
 	if workingDir == "" {
-		var err error
-		workingDir, err = os.Getwd()
-		if err != nil {
+		if wg, err := os.Getwd(); err != nil {
 			return nil, fmt.Errorf("error getting current working directory: %w", err)
+		} else {
+			workingDir = wg
 		}
 	}
-	return &InputMethod{WorkingDirectory: workingDir}, nil
+
+	return &InputMethod{
+		WorkingDirectory: workingDir,
+	}, nil
 }
 
-func (i *InputMethod) GetResourceCredentialConsumerIdentity(_ context.Context, _ *constructorruntime.Resource) (runtime.Identity, error) {
+func (i *InputMethod) GetInputMethodScheme() *runtime.Scheme {
+	return Scheme
+}
+
+// GetResourceCredentialConsumerIdentity returns nil identity and ErrDirsDoNotRequireCredentials
+// since directory inputs do not require any credentials for access. Directories are read directly
+// from the local filesystem without authentication.
+func (i *InputMethod) GetResourceCredentialConsumerIdentity(_ context.Context, _ *constructorruntime.Resource) (identity runtime.Identity, err error) {
 	return nil, ErrDirsDoNotRequireCredentials
 }
 
-func (i *InputMethod) ProcessResource(ctx context.Context, resource *constructorruntime.Resource, _ map[string]string) (*constructorruntime.ResourceInputMethodResult, error) {
-	var dir v1.Dir
-	if err := Scheme.Convert(resource.Input, &dir); err != nil {
+// ProcessResource processes a dir-based resource input by converting the input specification
+// to a v1.Dir format, reading the directory from the filesystem, and returning the processed
+// blob data. This method handles optional compression and other operations
+// as specified in the input configuration.
+//
+// The method performs the following steps:
+//  1. Converts the resource input to v1.Dir specification
+//  2. Calls GetV1DirBlob to read and process the directory
+//  3. Returns the processed blob data wrapped in a ResourceInputMethodResult
+func (i *InputMethod) ProcessResource(ctx context.Context, resource *constructorruntime.Resource, _ map[string]string) (result *constructor.ResourceInputMethodResult, err error) {
+	dir := v1.Dir{}
+	if err := i.GetInputMethodScheme().Convert(resource.Input, &dir); err != nil {
 		return nil, fmt.Errorf("error converting resource input spec: %w", err)
 	}
-
-	resolveRelativeDirPath(&dir, i.WorkingDirectory)
 
 	dirBlob, err := GetV1DirBlob(ctx, dir, i.WorkingDirectory)
 	if err != nil {
 		return nil, fmt.Errorf("error getting dir blob based on resource input specification: %w", err)
 	}
 
-	return &constructorruntime.ResourceInputMethodResult{ProcessedBlobData: dirBlob}, nil
+	return &constructor.ResourceInputMethodResult{
+		ProcessedBlobData: dirBlob,
+	}, nil
 }
 
-func (i *InputMethod) GetSourceCredentialConsumerIdentity(_ context.Context, _ *constructorruntime.Source) (runtime.Identity, error) {
+// GetSourceCredentialConsumerIdentity returns nil identity and ErrDirsDoNotRequireCredentials
+// since directory inputs do not require any credentials for access. Directories are read directly
+// from the local filesystem without authentication.
+func (i *InputMethod) GetSourceCredentialConsumerIdentity(_ context.Context, _ *constructorruntime.Source) (identity runtime.Identity, err error) {
 	return nil, ErrDirsDoNotRequireCredentials
 }
 
-func (i *InputMethod) ProcessSource(ctx context.Context, src *constructorruntime.Source, _ map[string]string) (*constructorruntime.SourceInputMethodResult, error) {
-	var dir v1.Dir
-	if err := Scheme.Convert(src.Input, &dir); err != nil {
-		return nil, fmt.Errorf("error converting source input spec: %w", err)
+// ProcessSource processes a dir-based source input by converting the input specification
+// to a v1.Dir format, reading the directory from the filesystem, and returning the processed
+// blob data. This method handles optional compression and other operations
+// as specified in the input configuration.
+//
+// The method performs the following steps:
+//  1. Converts the source input to v1.Dir specification
+//  2. Calls GetV1DirBlob to read and process the directory
+//  3. Returns the processed blob data wrapped in a SourceInputMethodResult
+func (i *InputMethod) ProcessSource(ctx context.Context, src *constructorruntime.Source, _ map[string]string) (result *constructor.SourceInputMethodResult, err error) {
+	dir := v1.Dir{}
+	if err := i.GetInputMethodScheme().Convert(src.Input, &dir); err != nil {
+		return nil, fmt.Errorf("error converting resource input spec: %w", err)
 	}
 
-	resolveRelativeDirPath(&dir, i.WorkingDirectory)
-
-	dirBlob, err := GetV1DirBlob(ctx, dir, i.WorkingDirectory)
+	fileBlob, err := GetV1DirBlob(ctx, dir, i.WorkingDirectory)
 	if err != nil {
 		return nil, fmt.Errorf("error getting dir blob based on source input specification: %w", err)
 	}
 
-	return &constructorruntime.SourceInputMethodResult{ProcessedBlobData: dirBlob}, nil
-}
-
-// resolveRelativeDirPath resolves a relative directory path against the working directory.
-// GetV1DirBlob uses GetBlobFromPath which expects an absolute path for os.Stat.
-func resolveRelativeDirPath(dir *v1.Dir, workingDirectory string) {
-	if !filepath.IsAbs(dir.Path) && workingDirectory != "" {
-		dir.Path = filepath.Join(workingDirectory, dir.Path)
-	}
+	return &constructor.SourceInputMethodResult{
+		ProcessedBlobData: fileBlob,
+	}, nil
 }

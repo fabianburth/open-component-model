@@ -2,7 +2,6 @@ package internal
 
 import (
 	"ocm.software/open-component-model/bindings/go/credentials"
-	helmaccess "ocm.software/open-component-model/bindings/go/helm/access"
 	helmtransformer "ocm.software/open-component-model/bindings/go/helm/transformation"
 	helmv1alpha1 "ocm.software/open-component-model/bindings/go/helm/transformation/spec/v1alpha1"
 	ociaccess "ocm.software/open-component-model/bindings/go/oci/spec/access"
@@ -67,9 +66,9 @@ func NewDefaultBuilder(
 
 	// Helm transformers
 	getHelmChart := &helmtransformer.GetHelmChart{
-		Scheme:                           transformerScheme,
-		ResourceConsumerIdentityProvider: &helmaccess.HelmAccess{},
-		CredentialProvider:               credentialProvider,
+		Scheme:             transformerScheme,
+		ResourceRepository: resourceRepo,
+		CredentialProvider: credentialProvider,
 	}
 	convertHelmToOCI := &helmtransformer.ConvertHelmChartToOCI{
 		Scheme: transformerScheme,
@@ -77,6 +76,12 @@ func NewDefaultBuilder(
 
 	// Signing transformers
 	computeDigest := &signingtransformation.ComputeComponentDigest{Scheme: transformerScheme}
+
+	// File cleanup transformer
+	transformerScheme.MustRegisterWithAlias(&FileCleanupTransformation{}, FileCleanupVersionedType)
+	fileCleanup := &FileCleanup{
+		Scheme: transformerScheme,
+	}
 
 	return builder.NewBuilder(transformerScheme).
 		WithTransformer(&ociv1alpha1.OCIGetComponentVersion{}, ociGet).
@@ -91,5 +96,6 @@ func NewDefaultBuilder(
 		WithTransformer(&ociv1alpha1.AddOCIArtifact{}, ociAddOCIArtifact).
 		WithTransformer(&helmv1alpha1.GetHelmChart{}, getHelmChart).
 		WithTransformer(&helmv1alpha1.ConvertHelmToOCI{}, convertHelmToOCI).
-		WithTransformer(&signingv1alpha1.ComputeComponentDigest{}, computeDigest)
+		WithTransformer(&signingv1alpha1.ComputeComponentDigest{}, computeDigest).
+		WithTransformer(&FileCleanupTransformation{}, fileCleanup)
 }

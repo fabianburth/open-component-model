@@ -826,7 +826,7 @@ resources:
 		r.Equal("my-file", desc.Component.Resources[0].Name, "expected resource name to match")
 		r.Equal("blob", desc.Component.Resources[0].Type, "expected resource type to match")
 		r.NotNil(desc.Component.Resources[0].Access, "expected resource access to be set")
-		r.Equal("localBlob/v1", desc.Component.Resources[0].Access.GetType().String(), "expected resource access type to match")
+		r.Equal("LocalBlob/v1", desc.Component.Resources[0].Access.GetType().String(), "expected resource access type to match")
 
 		blb, _, err := helperRepo.GetLocalResource(t.Context(), desc.Component.Name, desc.Component.Version, desc.Component.Resources[0].ToIdentity())
 		r.NoError(err, "could not retrieve local resource from test repository")
@@ -973,41 +973,6 @@ resources:
 			r.Equal(ocmctx.FromContext(cmd.Context()).FilesystemConfig().WorkingDirectory, tmp, "expected working directory to be set in ocm context automatically")
 
 			r.NoError(err, "could not construct component version with working directory")
-		})
-
-		t.Run("default constructor is resolved relative to working-directory", func(t *testing.T) {
-			r := require.New(t)
-
-			// Set up a subdirectory that contains the default-named constructor file
-			// and a resource, but do NOT pass --constructor explicitly.
-			workingDir := filepath.Join(tmp, "wd-default-constructor")
-			r.NoError(os.MkdirAll(workingDir, 0o700))
-
-			resourceFile := filepath.Join(workingDir, "resource.txt")
-			r.NoError(os.WriteFile(resourceFile, []byte("hello"), 0o600))
-
-			constructorYAML := fmt.Sprintf(`
-name: ocm.software/wd-default
-version: 1.0.0
-provider:
-  name: ocm.software
-resources:
-  - name: my-res
-    type: blob
-    input:
-      type: file/v1
-      path: %s
-`, resourceFile)
-			// Write the constructor with the default name that the CLI looks for.
-			r.NoError(os.WriteFile(filepath.Join(workingDir, "component-constructor.yaml"), []byte(constructorYAML), 0o600))
-
-			wdArchive := filepath.Join(tmp, "wd-default-archive")
-			_, err := test.OCM(t, test.WithArgs("add", "cv",
-				"--repository", wdArchive,
-				"--working-directory", workingDir,
-			), test.WithErrorOutput(test.NewJSONLogReader()))
-
-			r.NoError(err, "expected default constructor to be found via --working-directory")
 		})
 	})
 	t.Run("construction with references targeting fallback resolvers", func(t *testing.T) {
@@ -1242,18 +1207,89 @@ components:
 	})
 }
 
-// Test_Add_Component_Version_Formats tests that construction succeeds with different configurations
-// and that the --output flag works correctly in dry-run mode.
+// Test_Add_Component_Version_Formats tests the different output formats for the add cv command
 func Test_Add_Component_Version_Formats(t *testing.T) {
+	r := require.New(t)
+	tests := []struct {
+		name           string
+		outputArg      string
+		expectedOutput string
+		expectedError  bool
+	}{
+		{
+			name: "Default Options (Table)",
+			expectedOutput: ` COMPONENT                │ VERSION │ PROVIDER     
+──────────────────────────┼─────────┼──────────────
+ ocm.software/examples-01 │ 1.0.0   │ ocm.software 
+`,
+			expectedError: false,
+		},
+		{
+			name:      "YAML output",
+			outputArg: "--output=yaml",
+			expectedOutput: `
+- component:
+    componentReferences: null
+    name: ocm.software/examples-01
+    provider: ocm.software
+    repositoryContexts: null
+    resources:
+    - access:
+        localReference: sha256:c3ab8ff13720e8ad9047dd39466b3c8974e592c2fa383d4a3960714caef0c4f2
+        mediaType: text/plain; charset=utf-8
+        type: LocalBlob/v1
+      digest:
+        hashAlgorithm: SHA-256
+        normalisationAlgorithm: genericBlobDigest/v1
+        value: c3ab8ff13720e8ad9047dd39466b3c8974e592c2fa383d4a3960714caef0c4f2
+      name: my-file
+      relation: local
+      type: blob
+      version: 1.0.0
+    sources: null
+    version: 1.0.0
+  meta:
+    schemaVersion: v2
 
-	t.Run("Default construction succeeds", func(t *testing.T) {
-		r := require.New(t)
-		tmp := t.TempDir()
+`,
+			expectedError: false,
+		},
+		{
+			name:           "JSON output",
+			outputArg:      "--output=json",
+			expectedOutput: "", // JSON output is handled differently
+			expectedError:  false,
+		},
+		{
+			name:           "NDJSON output",
+			outputArg:      "--output=ndjson",
+			expectedOutput: "", // JSON output is handled differently
+			expectedError:  false,
+		},
+		{
+			name:      "tree output",
+			outputArg: "--output=tree",
+			expectedOutput: ` NESTING  COMPONENT                 VERSION  PROVIDER      IDENTITY                                    
+ └─       ocm.software/examples-01  1.0.0    ocm.software  name=ocm.software/examples-01,version=1.0.0`,
+			expectedError: false,
+		},
+		{
+			name:           "Invalid output format",
+			outputArg:      "--output=invalid",
+			expectedOutput: "",
+			expectedError:  true,
+		},
+	}
 
-		testFilePath := filepath.Join(tmp, "test-file.txt")
-		r.NoError(os.WriteFile(testFilePath, []byte("foobar"), 0o600))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmp := t.TempDir()
 
-		constructorYAML := fmt.Sprintf(`
+			// Create a test file to be added to the component version
+			testFilePath := filepath.Join(tmp, "test-file.txt")
+			r.NoError(os.WriteFile(testFilePath, []byte("foobar"), 0o600), "could not create test file")
+
+			constructorYAML := fmt.Sprintf(`
 name: ocm.software/examples-01
 version: 1.0.0
 provider:
@@ -1266,145 +1302,83 @@ resources:
       path: %[1]s
 `, testFilePath)
 
-		constructorYAMLFilePath := filepath.Join(tmp, "component-constructor.yaml")
-		r.NoError(os.WriteFile(constructorYAMLFilePath, []byte(constructorYAML), 0o600))
+			constructorYAMLFilePath := filepath.Join(tmp, "component-constructor.yaml")
+			r.NoError(os.WriteFile(constructorYAMLFilePath, []byte(constructorYAML), 0o600))
 
-		archiveFilePath := filepath.Join(tmp, "transport-archive")
-		logs := test.NewJSONLogReader()
+			archiveFilePath := filepath.Join(tmp, "transport-archive")
+			r := require.New(t)
+			logs := test.NewJSONLogReader()
+			result := new(bytes.Buffer)
+			args := []string{
+				"add", "cv",
+				"--constructor", constructorYAMLFilePath,
+				"--repository", archiveFilePath,
+			}
+			if tt.outputArg != "" {
+				args = append(args, tt.outputArg)
+			}
+			_, err := test.OCM(t, test.WithArgs(args...), test.WithErrorOutput(logs), test.WithOutput(result))
 
-		_, err := test.OCM(t, test.WithArgs("add", "cv",
-			"--constructor", constructorYAMLFilePath,
-			"--repository", archiveFilePath,
-		), test.WithErrorOutput(logs))
+			if tt.expectedError {
+				r.Error(err, "expected error but got none")
+				return
+			}
 
-		r.NoError(err, "construction should succeed")
+			r.NoError(err, "failed to run command")
 
-		// Verify the component was actually created
-		fs, err := filesystem.NewFS(archiveFilePath, os.O_RDONLY)
-		r.NoError(err)
-		archive := ctf.NewFileSystemCTF(fs)
-		helperRepo, err := oci.NewRepository(ocictf.WithCTF(ocictf.NewFromCTF(archive)))
-		r.NoError(err)
-		desc, err := helperRepo.GetComponentVersion(t.Context(), "ocm.software/examples-01", "1.0.0")
-		r.NoError(err)
-		r.Equal("ocm.software/examples-01", desc.Component.Name)
-		r.Equal("1.0.0", desc.Component.Version)
-	})
+			if tt.outputArg == "--output=json" || tt.outputArg == "--output=ndjson" {
+				// Handle JSON output separately
+				var resultJSON any
+				decoder := json.NewDecoder(result)
+				r.NoError(decoder.Decode(&resultJSON), "failed to decode result JSON")
 
-	t.Run("Dry-run YAML output", func(t *testing.T) {
-		r := require.New(t)
-		tmp := t.TempDir()
+				component := map[string]any{
+					"component": map[string]any{
+						"componentReferences": nil,
+						"name":                "ocm.software/examples-01",
+						"provider":            "ocm.software",
+						"repositoryContexts":  nil,
+						"resources": []any{
+							map[string]any{
+								"name":     "my-file",
+								"type":     "blob",
+								"version":  "1.0.0",
+								"relation": "local",
+								"digest": map[string]any{
+									"hashAlgorithm":          "SHA-256",
+									"normalisationAlgorithm": "genericBlobDigest/v1",
+									"value":                  "c3ab8ff13720e8ad9047dd39466b3c8974e592c2fa383d4a3960714caef0c4f2",
+								},
+								"access": map[string]any{
+									"type":           "LocalBlob/v1",
+									"mediaType":      "text/plain; charset=utf-8",
+									"localReference": "sha256:c3ab8ff13720e8ad9047dd39466b3c8974e592c2fa383d4a3960714caef0c4f2",
+								},
+							},
+						},
+						"sources": nil,
+						"version": "1.0.0",
+					},
+					"meta": map[string]any{
+						"schemaVersion": "v2",
+					},
+				}
 
-		testFilePath := filepath.Join(tmp, "test-file.txt")
-		r.NoError(os.WriteFile(testFilePath, []byte("foobar"), 0o600))
+				switch {
+				case strings.Contains(tt.outputArg, "--output=json"):
+					r.EqualValues([]any{component}, resultJSON)
+				case strings.Contains(tt.outputArg, "--output=ndjson"):
+					r.EqualValues(component, resultJSON)
+				}
+			}
 
-		constructorYAML := fmt.Sprintf(`
-name: ocm.software/examples-01
-version: 1.0.0
-provider:
-  name: ocm.software
-resources:
-  - name: my-file
-    type: blob
-    input:
-      type: file/v1
-      path: %[1]s
-`, testFilePath)
+			logEntries, err := logs.List()
+			r.NoError(err, "failed to list log entries")
+			r.NotEmpty(logEntries, "expected log entries to be present")
 
-		constructorYAMLFilePath := filepath.Join(tmp, "component-constructor.yaml")
-		r.NoError(os.WriteFile(constructorYAMLFilePath, []byte(constructorYAML), 0o600))
-
-		archiveFilePath := filepath.Join(tmp, "transport-archive")
-		logs := test.NewJSONLogReader()
-		result := new(bytes.Buffer)
-
-		_, err := test.OCM(t, test.WithArgs("add", "cv",
-			"--constructor", constructorYAMLFilePath,
-			"--repository", archiveFilePath,
-			"--dry-run",
-			"--output=yaml",
-		), test.WithErrorOutput(logs), test.WithOutput(result))
-
-		r.NoError(err, "dry-run should succeed")
-		r.NotEmpty(result.String(), "expected YAML output")
-		r.Contains(result.String(), "transformations:")
-	})
-
-	t.Run("Dry-run JSON output", func(t *testing.T) {
-		r := require.New(t)
-		tmp := t.TempDir()
-
-		testFilePath := filepath.Join(tmp, "test-file.txt")
-		r.NoError(os.WriteFile(testFilePath, []byte("foobar"), 0o600))
-
-		constructorYAML := fmt.Sprintf(`
-name: ocm.software/examples-01
-version: 1.0.0
-provider:
-  name: ocm.software
-resources:
-  - name: my-file
-    type: blob
-    input:
-      type: file/v1
-      path: %[1]s
-`, testFilePath)
-
-		constructorYAMLFilePath := filepath.Join(tmp, "component-constructor.yaml")
-		r.NoError(os.WriteFile(constructorYAMLFilePath, []byte(constructorYAML), 0o600))
-
-		archiveFilePath := filepath.Join(tmp, "transport-archive")
-		logs := test.NewJSONLogReader()
-		result := new(bytes.Buffer)
-
-		_, err := test.OCM(t, test.WithArgs("add", "cv",
-			"--constructor", constructorYAMLFilePath,
-			"--repository", archiveFilePath,
-			"--dry-run",
-			"--output=json",
-		), test.WithErrorOutput(logs), test.WithOutput(result))
-
-		r.NoError(err, "dry-run should succeed")
-
-		var resultJSON any
-		decoder := json.NewDecoder(result)
-		r.NoError(decoder.Decode(&resultJSON), "output should be valid JSON")
-	})
-
-	t.Run("Invalid output format", func(t *testing.T) {
-		r := require.New(t)
-		tmp := t.TempDir()
-
-		testFilePath := filepath.Join(tmp, "test-file.txt")
-		r.NoError(os.WriteFile(testFilePath, []byte("foobar"), 0o600))
-
-		constructorYAML := fmt.Sprintf(`
-name: ocm.software/examples-01
-version: 1.0.0
-provider:
-  name: ocm.software
-resources:
-  - name: my-file
-    type: blob
-    input:
-      type: file/v1
-      path: %[1]s
-`, testFilePath)
-
-		constructorYAMLFilePath := filepath.Join(tmp, "component-constructor.yaml")
-		r.NoError(os.WriteFile(constructorYAMLFilePath, []byte(constructorYAML), 0o600))
-
-		archiveFilePath := filepath.Join(tmp, "transport-archive")
-		logs := test.NewJSONLogReader()
-
-		_, err := test.OCM(t, test.WithArgs("add", "cv",
-			"--constructor", constructorYAMLFilePath,
-			"--repository", archiveFilePath,
-			"--output=invalid",
-		), test.WithErrorOutput(logs))
-
-		r.Error(err, "expected error for invalid output format")
-	})
+			r.EqualValues(strings.TrimSpace(tt.expectedOutput), strings.TrimSpace(result.String()), "expected output")
+		})
+	}
 }
 
 func Test_Version(t *testing.T) {
@@ -1800,7 +1774,7 @@ resources:
 	sourceDesc, err := sourceRepo.GetComponentVersion(t.Context(), componentName, componentVersion)
 	r.NoError(err, "could not retrieve component version from source repository")
 	r.Len(sourceDesc.Component.Resources, 1, "expected one resource in source component version")
-	r.Equal("localBlob/v1", sourceDesc.Component.Resources[0].Access.GetType().String(), "expected local blob access type")
+	r.Equal("LocalBlob/v1", sourceDesc.Component.Resources[0].Access.GetType().String(), "expected local blob access type")
 
 	// Transfer component version to target repository
 	targetArchivePath := filepath.Join(tmp, "target-archive")
@@ -1840,7 +1814,7 @@ resources:
 	r.Len(targetDesc.Component.Resources, 1, "expected one resource in target component version")
 	r.Equal(resourceName, targetDesc.Component.Resources[0].Name, "expected resource name to match")
 	r.Equal("blob", targetDesc.Component.Resources[0].Type, "expected resource type to match")
-	r.Equal("localBlob/v1", targetDesc.Component.Resources[0].Access.GetType().String(), "expected resource access type to match")
+	r.Equal("LocalBlob/v1", targetDesc.Component.Resources[0].Access.GetType().String(), "expected resource access type to match")
 
 	// Verify local blob resource content is accessible from target repository
 	resourceIdentity := targetDesc.Component.Resources[0].ToIdentity()

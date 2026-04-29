@@ -3,28 +3,38 @@ package input
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 
 	constructorruntime "ocm.software/open-component-model/bindings/go/constructor/runtime"
-	descriptor "ocm.software/open-component-model/bindings/go/descriptor/runtime"
-	"ocm.software/open-component-model/bindings/go/helm/internal"
-	v1 "ocm.software/open-component-model/bindings/go/helm/input/spec/v1"
+	helminternal "ocm.software/open-component-model/bindings/go/helm/internal"
+	"ocm.software/open-component-model/bindings/go/helm/spec/input"
+	"ocm.software/open-component-model/bindings/go/helm/spec/input/v1"
 	"ocm.software/open-component-model/bindings/go/oci/looseref"
 	access "ocm.software/open-component-model/bindings/go/oci/spec/access"
 	ocispec "ocm.software/open-component-model/bindings/go/oci/spec/access/v1"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 
-var _ constructorruntime.ResourceInputMethod = (*InputMethod)(nil)
+var _ interface {
+	constructorruntime.ResourceInputMethod
+} = (*InputMethod)(nil)
 
-// InputMethod processes Helm chart input specifications into blobs.
+// InputMethod implements the ResourceInputMethod and SourceInputMethod interfaces for helm-based inputs.
+// It provides functionality to process local filesystem directories, which have helm chart structure,
+// as either resources or sources in the OCM constructor system.
+//
+// Since directories are accessed directly from the local filesystem, no credentials
+// are required for any operations.
+//
+// The TempFolder field is used to specify a base temporary folder for processing helm charts.
+// It is set by the user when creating an instance of InputMethod. If the field is empty,
+// the system's default temporary directory will be used.
 type InputMethod struct {
 	TempFolder       string
 	WorkingDirectory string
 }
 
-// NewInputMethod creates a new InputMethod with the given temp folder.
-// If tempFolder is empty, the system default temp directory is used.
 func NewInputMethod(tempFolder string) (*InputMethod, error) {
 	if tempFolder == "" {
 		tempFolder = os.TempDir()
@@ -32,60 +42,87 @@ func NewInputMethod(tempFolder string) (*InputMethod, error) {
 	return &InputMethod{TempFolder: tempFolder}, nil
 }
 
-func (i *InputMethod) GetResourceCredentialConsumerIdentity(_ context.Context, resource *constructorruntime.Resource) (runtime.Identity, error) {
-	var helm v1.Helm
-	if err := Scheme.Convert(resource.Input, &helm); err != nil {
-		return nil, fmt.Errorf("error converting resource input spec: %w", err)
-	}
+// LegacyHelmChartConsumerType is the type of the identity for remote helm repositories.
+const LegacyHelmChartConsumerType = "HelmChartRepository"
 
-	return internal.ConsumerIdentityFromURL(helm.HelmRepository)
+func (i *InputMethod) GetInputMethodScheme() *runtime.Scheme {
+	return input.Scheme
 }
 
-func (i *InputMethod) ProcessResource(ctx context.Context, resource *constructorruntime.Resource, credentials map[string]string) (*constructorruntime.ResourceInputMethodResult, error) {
-	var helm v1.Helm
-	if err := Scheme.Convert(resource.Input, &helm); err != nil {
+// GetResourceCredentialConsumerIdentity returns credentials consumer identity for remote helm repositories
+// or [ErrLocalHelmInputDoesNotRequireCredentials] for local helm inputs.
+func (i *InputMethod) GetResourceCredentialConsumerIdentity(ctx context.Context, resource *constructorruntime.Resource) (identity runtime.Identity, err error) {
+	helm := v1.Helm{}
+	if err := i.GetInputMethodScheme().Convert(resource.Input, &helm); err != nil {
 		return nil, fmt.Errorf("error converting resource input spec: %w", err)
 	}
 
-	var opts []Option
-	if len(credentials) > 0 {
-		opts = append(opts, WithCredentials(credentials))
-	}
-	if i.WorkingDirectory != "" {
-		opts = append(opts, WithWorkingDirectory(i.WorkingDirectory))
+	if helm.HelmRepository == "" {
+		slog.DebugContext(ctx, "no credentials are needed for local helm charts")
+		return nil, nil
 	}
 
-	helmBlob, chart, err := GetV1HelmBlob(ctx, helm, i.TempFolder, opts...)
+	return helminternal.CredentialConsumerIdentity(helm.HelmRepository)
+}
+
+// ProcessResource processes a helm-based resource input by converting the input specification
+// to a v1.Helm format, reading from local filesystem or downloading from remote repository,
+// and returning both the processed blob data and resource access information.
+//
+// For local charts (a path specified): Returns only ProcessedBlobData (local access)
+// For remote charts (helmRepository specified): Returns both ProcessedResource (remote access) and ProcessedBlobData
+func (i *InputMethod) ProcessResource(ctx context.Context, resource *constructorruntime.Resource, credentials map[string]string) (result *constructorruntime.ResourceInputMethodResult, err error) {
+	helm := v1.Helm{}
+	if err := i.GetInputMethodScheme().Convert(resource.Input, &helm); err != nil {
+		return nil, fmt.Errorf("error converting resource input spec: %w", err)
+	}
+
+	if i.TempFolder == "" {
+		// we cannot delete the temp folder since it will hold the downloaded helm chart blobs
+		// and we do not want to break existing fallback behavior for users who do not set the TempFolder field before
+		temp, err := os.MkdirTemp("", "helm-input-*")
+		if err != nil {
+			return nil, fmt.Errorf("error creating temporary directory for helm input processing: %w", err)
+		}
+		i.TempFolder = temp
+	}
+
+	helmBlob, chart, err := GetV1HelmBlob(ctx, helm, i.TempFolder, WithCredentials(credentials))
 	if err != nil {
 		return nil, fmt.Errorf("error getting helm blob based on resource input specification: %w", err)
 	}
 
-	// If Repository is set, create a resource access pointing to the remote helm chart.
-	if helm.Repository != "" {
-		processedResource, err := createRemoteHelmResource(chart, helm.Repository)
-		if err != nil {
-			return nil, fmt.Errorf("error creating remote helm resource access: %w", err)
-		}
-		return &constructorruntime.ResourceInputMethodResult{
-			ProcessedResource: processedResource,
-			ProcessedBlobData: helmBlob,
-		}, nil
+	result = &constructorruntime.ResourceInputMethodResult{
+		ProcessedBlobData: helmBlob,
 	}
 
-	return &constructorruntime.ResourceInputMethodResult{ProcessedBlobData: helmBlob}, nil
+	if helm.Repository != "" {
+		remoteResource, err := i.createRemoteResourceAccess(resource, helm, chart)
+		if err != nil {
+			return nil, fmt.Errorf("error creating remote resource access: %w", err)
+		}
+
+		res := constructorruntime.ConvertToDescriptorResource(remoteResource)
+		result.ProcessedResource = res
+	}
+
+	return result, nil
 }
 
-// createRemoteHelmResource creates a descriptor.Resource with OCI access for a helm chart stored in a remote repository.
-func createRemoteHelmResource(chart *ReadOnlyChart, repository string) (*descriptor.Resource, error) {
-	ref, err := looseref.ParseReference(repository)
+// createRemoteResourceAccess creates a resource descriptor with remote access information
+// for helm charts stored in remote repositories.
+func (i *InputMethod) createRemoteResourceAccess(resource *constructorruntime.Resource, helm v1.Helm, chart *ReadOnlyChart) (*constructorruntime.Resource, error) {
+	ref, err := looseref.ParseReference(helm.Repository)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse target access image reference %q: %w", repository, err)
+		return nil, fmt.Errorf("failed to parse target access image reference %q: %w", helm.Repository, err)
 	}
 
 	if ref.Tag == "" {
 		return nil, fmt.Errorf("tag is required for remote helm repository")
 	}
 
+	// If the given repository oci reference contains a tag, make sure it matches the version derived
+	// from the fetched chart.
 	if ref.Tag != chart.Version {
 		return nil, fmt.Errorf("provided version %q does not match tag %q", ref.Tag, chart.Version)
 	}
@@ -94,24 +131,20 @@ func createRemoteHelmResource(chart *ReadOnlyChart, repository string) (*descrip
 		ImageReference: ref.String(),
 	}
 
+	// set the default type for OCIImage
 	if _, err := access.Scheme.DefaultType(ociAccess); err != nil {
 		return nil, fmt.Errorf("error setting default type for OCIImage: %w", err)
 	}
 
-	var rawAccess runtime.Raw
-	if err := access.Scheme.Convert(ociAccess, &rawAccess); err != nil {
-		return nil, fmt.Errorf("error converting OCIImage access to raw: %w", err)
+	resource.Access = ociAccess
+	resource.Type = HelmRepositoryType
+
+	if resource.Name == "" {
+		resource.Name = chart.Name
+	}
+	if resource.Version == "" {
+		resource.Version = chart.Version
 	}
 
-	return &descriptor.Resource{
-		ElementMeta: descriptor.ElementMeta{
-			ObjectMeta: descriptor.ObjectMeta{
-				Name:    chart.Name,
-				Version: chart.Version,
-			},
-		},
-		Type:     HelmRepositoryType,
-		Relation: descriptor.ExternalRelation,
-		Access:   &rawAccess,
-	}, nil
+	return resource, nil
 }

@@ -2,6 +2,7 @@ package transformation
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -120,8 +121,11 @@ func convertDescriptorResourceToV2(res *descriptor.Resource) *v2.Resource {
 		Type:     res.Type,
 		Relation: v2.ResourceRelation(res.Relation),
 	}
-	if raw, ok := res.Access.(*runtime.Raw); ok {
-		v2Res.Access = raw.DeepCopy()
+	if res.Access != nil {
+		data, err := json.Marshal(res.Access)
+		if err == nil {
+			v2Res.Access = &runtime.Raw{Data: data}
+		}
 	}
 	return v2Res
 }

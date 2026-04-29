@@ -113,7 +113,7 @@ components:
         version: "1.0.0"
         type: plainText
         input:
-          type: utf8
+          type: UTF8/v1
           text: "backend service configuration"
 ```
 
@@ -152,7 +152,7 @@ components:
         version: "1.0.0"
         type: plainText
         input:
-          type: utf8
+          type: UTF8/v1
           text: "frontend service configuration"
 ```
 
@@ -199,7 +199,7 @@ components:
         version: "1.0.0"
         type: plainText
         input:
-          type: utf8
+          type: UTF8/v1
           text: "app deployment configuration"
 ```
 
@@ -356,7 +356,7 @@ Now that you know how to configure resolvers, you can:
   versions and work with CTF archives
 - [Input and Access Types]({{< relref "docs/reference/input-and-access-types.md" >}}) — Reference for resource input types (by value)
   and access types (by reference)
-- [Signing and Verification]({{< relref "signing-and-verification.md" >}}) — Sign and verify component versions with
+- [Signing and Verification]({{< relref "docs/tutorials/signing/plain.md" >}}) — Sign and verify component versions with
   cryptographic keys
 - [Migrate from Deprecated Resolvers]({{< relref "docs/how-to/migrate-from-deprecated-resolvers.md" >}}) — Replace deprecated fallback
   resolvers with glob-based resolvers

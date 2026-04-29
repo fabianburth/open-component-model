@@ -5,11 +5,11 @@ go 1.26.1
 require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/stretchr/testify v1.11.1
-	ocm.software/open-component-model/bindings/go/blob v0.0.11
-	ocm.software/open-component-model/bindings/go/descriptor/runtime v0.0.0-20260409111948-a6aca34e77a9
-	ocm.software/open-component-model/bindings/go/descriptor/v2 v2.0.3-alpha2
+	ocm.software/open-component-model/bindings/go/blob v0.0.12
+	ocm.software/open-component-model/bindings/go/descriptor/runtime v0.0.0-20260424114000-e25a69cc733c
+	ocm.software/open-component-model/bindings/go/descriptor/v2 v2.0.3-alpha3
 	ocm.software/open-component-model/bindings/go/repository v0.0.8
-	ocm.software/open-component-model/bindings/go/runtime v0.0.7
+	ocm.software/open-component-model/bindings/go/runtime v0.0.8
 	sigs.k8s.io/yaml v1.6.0
 )
 

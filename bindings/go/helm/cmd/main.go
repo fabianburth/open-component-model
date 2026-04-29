@@ -1,3 +1,4 @@
+// TODO(matthiasbruns): Drop plugin support in favour of built-in helm support https://github.com/open-component-model/ocm-project/issues/1029
 package main
 
 import (
@@ -12,8 +13,10 @@ import (
 	"ocm.software/open-component-model/bindings/go/blob"
 	filesystemv1alpha1 "ocm.software/open-component-model/bindings/go/configuration/filesystem/v1alpha1/spec"
 	genericv1 "ocm.software/open-component-model/bindings/go/configuration/generic/v1/spec"
+	constructorruntime "ocm.software/open-component-model/bindings/go/constructor/runtime"
 	helminput "ocm.software/open-component-model/bindings/go/helm/input"
-	helmspecv1 "ocm.software/open-component-model/bindings/go/helm/input/spec/v1"
+	inputspec "ocm.software/open-component-model/bindings/go/helm/spec/input"
+	helmv1 "ocm.software/open-component-model/bindings/go/helm/spec/input/v1"
 	plugin "ocm.software/open-component-model/bindings/go/plugin/client/sdk"
 	"ocm.software/open-component-model/bindings/go/plugin/manager/contracts"
 	v1 "ocm.software/open-component-model/bindings/go/plugin/manager/contracts/input/v1"
@@ -75,9 +78,9 @@ func main() {
 		Level: slog.LevelDebug,
 	}))
 
-	capabilities := endpoints.NewEndpoints(helminput.Scheme)
+	capabilities := endpoints.NewEndpoints(inputspec.Scheme)
 	helmPlugin := &HelmInputPlugin{}
-	if err := input.RegisterInputProcessor(&helmspecv1.Helm{}, helmPlugin, capabilities); err != nil {
+	if err := input.RegisterInputProcessor(&helmv1.Helm{}, helmPlugin, capabilities); err != nil {
 		logger.Error("failed to register helm input plugin", "error", err.Error())
 		os.Exit(1)
 	}
@@ -171,31 +174,26 @@ func parseFilesystemConfig(conf types.Config) (*filesystemv1alpha1.Config, error
 	return filesystemConfig, nil
 }
 
-// processHelmResource processes helm chart resources by calling GetV1HelmBlob directly.
+// processHelmResource wraps the helm.InputMethod to process resources
 func processHelmResource(ctx context.Context, request *v1.ProcessResourceInputRequest, credentials map[string]string, filesystemConfig *filesystemv1alpha1.Config) (_ *v1.ProcessResourceInputResponse, err error) {
+	resource := &constructorruntime.Resource{
+		AccessOrInput: constructorruntime.AccessOrInput{
+			Input: request.Resource.Input,
+		},
+	}
+
 	tempDir := ""
 	if filesystemConfig != nil {
 		tempDir = filesystemConfig.TempFolder
 	}
 
-	if tempDir == "" {
-		temp, err := os.MkdirTemp("", "helm-input-*")
-		if err != nil {
-			return nil, fmt.Errorf("error creating temporary directory: %w", err)
-		}
-		tempDir = temp
+	helmMethod := &helminput.InputMethod{
+		TempFolder: tempDir,
 	}
-
-	var helmSpec helmspecv1.Helm
-	if err := helminput.Scheme.Convert(request.Resource.Input, &helmSpec); err != nil {
-		return nil, fmt.Errorf("error converting resource input spec: %w", err)
-	}
-
-	helmBlob, _, err := helminput.GetV1HelmBlob(ctx, helmSpec, tempDir, helminput.WithCredentials(credentials))
+	result, err := helmMethod.ProcessResource(ctx, resource, credentials)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process resource: %w", err)
 	}
-
 	tmp, err := os.CreateTemp(tempDir, "helm-resource-*.tar.gz")
 	if err != nil {
 		return nil, fmt.Errorf("error creating temp file: %w", err)
@@ -206,12 +204,12 @@ func processHelmResource(ctx context.Context, request *v1.ProcessResourceInputRe
 		}
 	}()
 
-	if err := blob.Copy(tmp, helmBlob); err != nil {
+	if err := blob.Copy(tmp, result.ProcessedBlobData); err != nil {
 		return nil, fmt.Errorf("error copying blob data: %w", err)
 	}
 
 	var mediaType string
-	if mtAware, ok := helmBlob.(blob.MediaTypeAware); ok {
+	if mtAware, ok := result.ProcessedBlobData.(blob.MediaTypeAware); ok {
 		if mt, known := mtAware.MediaType(); known && mt != "" {
 			mediaType = mt
 		}

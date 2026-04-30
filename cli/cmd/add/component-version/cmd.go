@@ -443,7 +443,7 @@ func AddComponentVersion(cmd *cobra.Command, _ []string) error {
 	}
 	op.Finish(nil)
 
-	tracker.Stop()
+	tracker.Stop() // Restore slog before the log below; defer is the safety net for error paths.
 
 	slog.DebugContext(ctx, "construction completed successfully")
 	return nil

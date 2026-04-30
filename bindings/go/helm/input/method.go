@@ -20,16 +20,12 @@ var _ interface {
 	constructorruntime.ResourceInputMethod
 } = (*InputMethod)(nil)
 
-// InputMethod implements the ResourceInputMethod and SourceInputMethod interfaces for helm-based inputs.
+// InputMethod implements the ResourceInputMethod interface for helm-based inputs.
 // It provides functionality to process local filesystem directories, which have helm chart structure,
-// as either resources or sources in the OCM constructor system.
-//
-// Since directories are accessed directly from the local filesystem, no credentials
-// are required for any operations.
+// as resources in the OCM constructor system.
 //
 // The TempFolder field is used to specify a base temporary folder for processing helm charts.
-// It is set by the user when creating an instance of InputMethod. If the field is empty,
-// the system's default temporary directory will be used.
+// If the field is empty, the system's default temporary directory will be used.
 type InputMethod struct {
 	TempFolder       string
 	WorkingDirectory string
@@ -50,7 +46,7 @@ func (i *InputMethod) GetInputMethodScheme() *runtime.Scheme {
 }
 
 // GetResourceCredentialConsumerIdentity returns credentials consumer identity for remote helm repositories
-// or [ErrLocalHelmInputDoesNotRequireCredentials] for local helm inputs.
+// or nil for local helm inputs that do not require credentials.
 func (i *InputMethod) GetResourceCredentialConsumerIdentity(ctx context.Context, resource *constructorruntime.Resource) (identity runtime.Identity, err error) {
 	helm := v1.Helm{}
 	if err := i.GetInputMethodScheme().Convert(resource.Input, &helm); err != nil {

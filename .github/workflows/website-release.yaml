@@ -1,0 +1,78 @@
+# Creates a website/vX.Y.Z tag to release a new docs version.
+# The tag push automatically triggers the "Website: Version Release" workflow
+# which opens a PR pinning Hugo module imports to the tagged version.
+#
+# Version is derived from the branch name (releases/vX.Y) and existing
+# website tags, following the same pattern as CLI and controller releases.
+# Unlike those, the website skips the RC phase (no artifacts to validate)
+# and tags the final version directly.
+name: "Website: Release"
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Perform a dry run without pushing the tag"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Prepare Release Metadata
+    uses: ./.github/workflows/release-candidate-version.yml
+    with:
+      branch: ${{ github.ref_name }}
+      component_path: website
+
+  release:
+    name: Create tag
+    if: ${{ inputs.dry_run == false }}
+    needs: prepare
+    runs-on: ubuntu-24.04-arm
+    environment:
+      name: go-modules
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.ref_name }}
+          persist-credentials: false
+
+      - name: Generate token
+        id: token
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3
+        with:
+          app-id: ${{ secrets.OCMBOT_APP_ID }}
+          private-key: ${{ secrets.OCMBOT_PRIV_KEY }}
+
+      - name: Setup git config
+        env:
+          ACTOR: ${{ github.actor }}
+        run: |
+          git config --global user.name "${ACTOR}"
+          git config --global user.email "${ACTOR}@users.noreply.github.com"
+
+      - name: Import GPG key
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY_FOR_SIGNING }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+          git_user_signingkey: true
+          git_tag_gpgsign: true
+
+      - name: Create and push tag
+        env:
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+          NEW_TAG: ${{ needs.prepare.outputs.promotion_tag }}
+          VERSION: ${{ needs.prepare.outputs.base_version }}
+        run: |
+          git tag -s "$NEW_TAG" -m "Release website version ${VERSION}"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push origin "$NEW_TAG"

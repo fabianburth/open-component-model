@@ -1,6 +1,7 @@
-# Creates a website/vX.Y.Z tag to release a new docs version.
-# The tag push automatically triggers the "Website: Version Release" workflow
-# which opens a PR pinning Hugo module imports to the tagged version.
+# Releases a new website/docs version:
+# 1. Computes the next version from the release branch and existing tags
+# 2. Creates and pushes a signed website/vX.Y.Z tag
+# 3. Pins Hugo module imports to the tagged version and opens a PR
 #
 # Version is derived from the branch name (releases/vX.Y) and existing
 # website tags, following the same pattern as CLI and controller releases.
@@ -76,3 +77,68 @@ jobs:
           git tag -s "$NEW_TAG" -m "Release website version ${VERSION}"
           git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git push origin "$NEW_TAG"
+
+  version-release:
+    name: Release docs version
+    if: ${{ inputs.dry_run == false }}
+    needs: [prepare, release]
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+      id-token: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+          ref: main
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        working-directory: website
+        run: npm ci
+
+      - name: Fetch CLI go.mod at release tag
+        env:
+          VERSION: ${{ needs.prepare.outputs.base_version }}
+        run: |
+          git fetch origin tag "cli/v${VERSION}" --no-tags
+          git show "cli/v${VERSION}:cli/go.mod" > "${{ runner.temp }}/cli-go.mod"
+
+      - name: Release docs version
+        working-directory: website
+        env:
+          VERSION: ${{ needs.prepare.outputs.base_version }}
+        run: node scripts/release-version.js "$VERSION" --cli-gomod "${{ runner.temp }}/cli-go.mod"
+
+      - name: Get OCMBot installation token
+        id: generate_token
+        uses: tibdex/github-app-token@3beb63f4bd073e61482598c45c71c1019b59b73a # v2
+        with:
+          app_id: ${{ secrets.OCMBOT_APP_ID }}
+          private_key: ${{ secrets.OCMBOT_PRIV_KEY }}
+
+      - name: Create Pull Request
+        env:
+          VERSION: ${{ needs.prepare.outputs.base_version }}
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
+        with:
+          base: main
+          token: ${{ steps.generate_token.outputs.token }}
+          title: "chore(website): release docs version ${{ needs.prepare.outputs.base_version }}"
+          commit-message: "[github-actions] automated change"
+          add-paths: |
+            website/config/
+          branch: website/version-release/auto
+          branch-suffix: timestamp
+          delete-branch: true
+          sign-commits: true
+          body: |
+            Automated docs release for version ${{ needs.prepare.outputs.base_version }}.
+
+            Triggered by `Website: Release` workflow run.

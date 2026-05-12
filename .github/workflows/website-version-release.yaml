@@ -1,0 +1,97 @@
+# Releases a new docs version by pinning Hugo module imports to a tagged version.
+# On minor (X.Y.0): adds new version entry to hugo.toml and import blocks to module.toml.
+# On patch (X.Y.Z, Z>0): updates existing import tags for the minor version.
+# Opens a PR with the resulting config changes.
+#
+# Trigger: push a `website/vX.Y.Z` tag or run manually with a version input.
+name: "Website: Version Release"
+
+permissions:
+  contents: read
+
+on:
+  push:
+    tags:
+      - 'website/v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (X.Y.Z format, e.g. 0.3.0)'
+        required: true
+        type: string
+
+jobs:
+  version-release:
+    name: Release docs version
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: 'write'
+      id-token: 'write'
+      pull-requests: 'write'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+          # checks out main and uses the script from main (opposed to other
+          # release workflows) because this workflow opens a PR targeting main
+          ref: main
+
+      - name: Extract version
+        id: version
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        with:
+          script: |
+            const { computeVersion } = await import('${{ github.workspace }}/.github/scripts/compute-version.js');
+
+            const version = process.env.EVENT_NAME === 'workflow_dispatch'
+              ? process.env.INPUT_VERSION
+              : computeVersion(process.env.REF_NAME, 'website/v');
+
+            core.setOutput('version', version);
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        working-directory: website
+        run: npm ci
+
+      - name: Fetch CLI go.mod at release tag
+        run: |
+          git fetch origin tag "cli/v${{ steps.version.outputs.version }}" --no-tags
+          git show "cli/v${{ steps.version.outputs.version }}:cli/go.mod" > "${{ runner.temp }}/cli-go.mod"
+
+      - name: Release docs version
+        working-directory: website
+        run: node scripts/release-version.js ${{ steps.version.outputs.version }} --cli-gomod "${{ runner.temp }}/cli-go.mod"
+
+      - name: Get OCMBot installation token
+        id: generate_token
+        uses: tibdex/github-app-token@3beb63f4bd073e61482598c45c71c1019b59b73a # v2
+        with:
+          app_id: ${{ secrets.OCMBOT_APP_ID }}
+          private_key: ${{ secrets.OCMBOT_PRIV_KEY }}
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
+        with:
+          base: main
+          token: ${{ steps.generate_token.outputs.token }}
+          title: "chore(website): release docs version ${{ steps.version.outputs.version }}"
+          commit-message: "[github-actions] automated change"
+          add-paths: |
+            website/config/
+          branch: website/version-release/auto
+          branch-suffix: timestamp
+          delete-branch: true
+          sign-commits: true
+          body: |
+            Automated docs release for version ${{ steps.version.outputs.version }}.
+
+            Triggered by tag `website/v${{ steps.version.outputs.version }}`.

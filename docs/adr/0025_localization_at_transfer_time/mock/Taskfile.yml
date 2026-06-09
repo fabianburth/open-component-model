@@ -1,0 +1,486 @@
+# Transfer-time localization mock.
+#
+# Walks a 3-hop transfer chain (vendor -> corp -> airgap), demonstrating:
+#   - OCM descriptor resigning per hop (RSASSA-PSS keypairs, swap-in for sigstore)
+#   - Resource content rewrite (values.yaml image reference rewritten per hop)
+#   - In-toto SLSA Provenance v1 attestations attached as OCI referrers
+#   - Original-author chain verifiable from any downstream registry
+#
+# Run `task` for the index, then step through with the numbered tasks.
+# All templates live under templates/; nothing is inlined into this file.
+#
+# State is contained: 3 docker registry containers on ports 5001/5002/5003,
+# everything else under this directory.
+
+version: '3'
+
+vars:
+  ROOT: '{{.TASKFILE_DIR}}'
+  KEYS: '{{.ROOT}}/keys'
+  COMP: '{{.ROOT}}/components'
+  OUT: '{{.ROOT}}/out'
+  ATT: '{{.ROOT}}/attestations'
+  TPL: '{{.ROOT}}/templates'
+
+  COMPONENT_NAME: ocm.software/mock/transfer-localize
+  COMPONENT_VERSION: 1.0.0
+
+  VENDOR_REG: localhost:5001
+  CORP_REG: localhost:5002
+  AIRGAP_REG: localhost:5003
+
+  IMAGE_NAME: nginx
+  IMAGE_TAG: 1.27-alpine
+
+env:
+  COSIGN_PASSWORD: ''
+
+tasks:
+
+  default:
+    desc: List the demo steps in order
+    silent: true
+    cmds:
+      - |
+        cat <<MSG
+
+        Transfer-time localization — mock walkthrough
+
+        Run in order:
+          task prereqs                   Verify required tools
+          task setup                     Start 3 registries, generate keys
+          task hop0-publish              Vendor publishes signed component
+          task hop0-verify               Verify vendor signature
+          task hop1-transfer             Transfer vendor -> corp (no localize)
+          task hop1-localize             Rewrite values.yaml + resign + attest
+          task hop1-verify               Verify corp signature + chain
+          task hop2-transfer             Transfer corp -> airgap
+          task hop2-localize             Rewrite again + resign + attest
+          task hop2-verify               Verify airgap signature + walk chain
+          task chain-walk                Walk full provenance chain
+          task chain-diff HOP=1          Diff resource bytes between hops
+          task teardown                  Stop registries (state preserved)
+          task clean                     Wipe all generated state
+
+        Each task prints what it did and how to introspect the result.
+
+        MSG
+
+  prereqs:
+    desc: Check that required tools are installed
+    silent: true
+    cmds:
+      - |
+        missing=0
+        for tool in docker oras jq yq openssl ocm cosign envsubst; do
+          if ! command -v $tool >/dev/null 2>&1; then
+            echo "MISSING: $tool"
+            missing=1
+          fi
+        done
+        if [ $missing -eq 1 ]; then
+          echo
+          echo "Install hints (macOS):"
+          echo "  brew install oras jq yq cosign gettext"
+          echo "  ocm: build from this repo (task build) or install via release"
+          echo "  docker: install Docker Desktop"
+          exit 1
+        fi
+        echo "All tools available."
+
+  setup:
+    desc: Start vendor/corp/airgap registries and generate per-hop keypairs
+    deps: [setup-registries, setup-keys]
+
+  setup-registries:
+    desc: Start 3 local zot OCI registries on ports 5001/5002/5003
+    silent: true
+    vars:
+      ZOT_ARCH:
+        sh: case "$(uname -m)" in arm64|aarch64) echo arm64 ;; *) echo amd64 ;; esac
+      ZOT_IMAGE: 'ghcr.io/project-zot/zot-linux-{{.ZOT_ARCH}}:latest'
+    status:
+      - docker ps --format '{{`{{.Names}}`}}' | grep -q '^mock-vendor-reg$'
+      - docker ps --format '{{`{{.Names}}`}}' | grep -q '^mock-corp-reg$'
+      - docker ps --format '{{`{{.Names}}`}}' | grep -q '^mock-airgap-reg$'
+    cmds:
+      - docker run -d --rm --name mock-vendor-reg -p 5001:5000 {{.ZOT_IMAGE}}
+      - docker run -d --rm --name mock-corp-reg   -p 5002:5000 {{.ZOT_IMAGE}}
+      - docker run -d --rm --name mock-airgap-reg -p 5003:5000 {{.ZOT_IMAGE}}
+      - sleep 1
+      - 'echo "Registries running. Inspect with curl http://localhost:500{1,2,3}/v2/"'
+      - 'echo "Or browse the zot UI at http://localhost:5001 / 5002 / 5003"'
+
+  setup-keys:
+    desc: Generate RSA keys (OCM signatures) and cosign keys (DSSE attestations)
+    silent: true
+    status:
+      - test -f {{.KEYS}}/vendor-rsa.priv
+      - test -f {{.KEYS}}/corp-rsa.priv
+      - test -f {{.KEYS}}/airgap-rsa.priv
+      - test -f {{.KEYS}}/vendor-cosign.key
+      - test -f {{.KEYS}}/corp-cosign.key
+      - test -f {{.KEYS}}/airgap-cosign.key
+    cmds:
+      - mkdir -p {{.KEYS}}
+      - |
+        for hop in vendor corp airgap; do
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 \
+            -out {{.KEYS}}/$hop-rsa.priv -quiet
+          openssl pkey -in {{.KEYS}}/$hop-rsa.priv -pubout -out {{.KEYS}}/$hop-rsa.pub
+        done
+      - |
+        cd {{.KEYS}}
+        for hop in vendor corp airgap; do
+          cosign generate-key-pair --output-key-prefix $hop-cosign >/dev/null 2>&1
+        done
+      - 'echo "Keys under {{.KEYS}}:"'
+      - ls -1 {{.KEYS}}
+
+  # ─── Hop 0: vendor publishes ────────────────────────────────────────────
+
+  hop0-publish:
+    desc: Vendor builds and signs the component, pushes to vendor registry
+    deps: [setup]
+    cmds:
+      - task: hop-prepare
+        vars:
+          HOP_DIR: hop0
+          PROVIDER: vendor.example.com
+          IMAGE_REPO: docker.io/library/{{.IMAGE_NAME}}
+          IMAGE_REF: docker.io/library/{{.IMAGE_NAME}}:{{.IMAGE_TAG}}
+      - task: hop-add-cv
+        vars: {HOP_DIR: hop0}
+      - task: hop-transfer-cv
+        vars: {HOP_DIR: hop0, TARGET_REG: '{{.VENDOR_REG}}'}
+      - task: hop-sign
+        vars: {SIGNER: vendor, REG: '{{.VENDOR_REG}}'}
+      - 'echo "Vendor published. Inspect with:"'
+      - 'echo "  ocm get cv oci::http://{{.VENDOR_REG}}//{{.COMPONENT_NAME}}:{{.COMPONENT_VERSION}} -o yaml"'
+
+  hop0-verify:
+    desc: Verify the vendor signature with the vendor public key
+    cmds:
+      - task: hop-verify
+        vars: {SIGNER: vendor, REG: '{{.VENDOR_REG}}'}
+
+  # ─── Hop 1: vendor → corp, with localization ────────────────────────────
+
+  hop1-transfer:
+    desc: Plain transfer vendor -> corp (no rewrite, signature carried over)
+    cmds:
+      - ocm transfer cv --copy-resources --upload-as ociArtifact oci::http://{{.VENDOR_REG}}//{{.COMPONENT_NAME}}:{{.COMPONENT_VERSION}} oci::http://{{.CORP_REG}}
+      - 'echo "Vendor signature still on the corp-side descriptor:"'
+      - ocm get cv oci::http://{{.CORP_REG}}//{{.COMPONENT_NAME}}:{{.COMPONENT_VERSION}} -o yaml
+
+  hop1-localize:
+    desc: Rewrite values.yaml for corp mirror, resign as corp, attest
+    cmds:
+      - task: hop-rewrite
+        vars:
+          HOP_DIR: hop1
+          SOURCE_REG: '{{.CORP_REG}}'
+          OLD_REPO: docker.io/library/{{.IMAGE_NAME}}
+          NEW_REPO: '{{.CORP_REG}}/library/{{.IMAGE_NAME}}'
+      - task: hop-prepare
+        vars:
+          HOP_DIR: hop1
+          PROVIDER: corp.example.com
+          IMAGE_REPO: '{{.CORP_REG}}/library/{{.IMAGE_NAME}}'
+          IMAGE_REF: 'http://{{.VENDOR_REG}}/library/{{.IMAGE_NAME}}:{{.IMAGE_TAG}}'
+          KEEP_VALUES: 'true'
+      - task: hop-add-cv
+        vars: {HOP_DIR: hop1}
+      - task: hop-transfer-cv
+        vars: {HOP_DIR: hop1, TARGET_REG: '{{.CORP_REG}}'}
+      - task: hop-sign
+        vars: {SIGNER: corp, REG: '{{.CORP_REG}}'}
+      - task: hop-attest
+        vars:
+          HOP: '1'
+          SIGNER: corp
+          PREV_REG: '{{.VENDOR_REG}}'
+          THIS_REG: '{{.CORP_REG}}'
+          BUILDER_ID: corp.example.com/transfer-agent
+          OLD_REPO: docker.io/library/{{.IMAGE_NAME}}
+          NEW_REPO: '{{.CORP_REG}}/library/{{.IMAGE_NAME}}'
+      - task: hop-carry-chain
+        vars:
+          THIS_REG: '{{.CORP_REG}}'
+          ANCESTORS: '{{.VENDOR_REG}}'
+
+  hop1-verify:
+    desc: Verify the corp signature, walk back to vendor via the attestation
+    cmds:
+      - task: hop-verify
+        vars: {SIGNER: corp, REG: '{{.CORP_REG}}'}
+      - task: chain-walk
+        vars: {REG: '{{.CORP_REG}}'}
+
+  # ─── Hop 2: corp → airgap, with localization ────────────────────────────
+
+  hop2-transfer:
+    desc: Plain transfer corp -> airgap (no rewrite)
+    cmds:
+      - ocm transfer cv --copy-resources --upload-as ociArtifact oci::http://{{.CORP_REG}}//{{.COMPONENT_NAME}}:{{.COMPONENT_VERSION}} oci::http://{{.AIRGAP_REG}}
+
+  hop2-localize:
+    desc: Rewrite values.yaml for airgap mirror, resign as airgap, attest
+    cmds:
+      - task: hop-rewrite
+        vars:
+          HOP_DIR: hop2
+          SOURCE_REG: '{{.AIRGAP_REG}}'
+          OLD_REPO: '{{.CORP_REG}}/library/{{.IMAGE_NAME}}'
+          NEW_REPO: '{{.AIRGAP_REG}}/library/{{.IMAGE_NAME}}'
+      - task: hop-prepare
+        vars:
+          HOP_DIR: hop2
+          PROVIDER: airgap.example.com
+          IMAGE_REPO: '{{.AIRGAP_REG}}/library/{{.IMAGE_NAME}}'
+          IMAGE_REF: 'http://{{.CORP_REG}}/library/{{.IMAGE_NAME}}:{{.IMAGE_TAG}}'
+          KEEP_VALUES: 'true'
+      - task: hop-add-cv
+        vars: {HOP_DIR: hop2}
+      - task: hop-transfer-cv
+        vars: {HOP_DIR: hop2, TARGET_REG: '{{.AIRGAP_REG}}'}
+      - task: hop-sign
+        vars: {SIGNER: airgap, REG: '{{.AIRGAP_REG}}'}
+      - task: hop-attest
+        vars:
+          HOP: '2'
+          SIGNER: airgap
+          PREV_REG: '{{.CORP_REG}}'
+          THIS_REG: '{{.AIRGAP_REG}}'
+          BUILDER_ID: airgap.example.com/transfer-agent
+          OLD_REPO: '{{.CORP_REG}}/library/{{.IMAGE_NAME}}'
+          NEW_REPO: '{{.AIRGAP_REG}}/library/{{.IMAGE_NAME}}'
+      - task: hop-carry-chain
+        vars:
+          THIS_REG: '{{.AIRGAP_REG}}'
+          ANCESTORS: '{{.CORP_REG}} {{.VENDOR_REG}}'
+
+  hop2-verify:
+    desc: Verify airgap signature, walk full chain back to vendor
+    cmds:
+      - task: hop-verify
+        vars: {SIGNER: airgap, REG: '{{.AIRGAP_REG}}'}
+      - task: chain-walk
+        vars: {REG: '{{.AIRGAP_REG}}'}
+
+  # ─── Chain inspection ───────────────────────────────────────────────────
+
+  chain-walk:
+    desc: Walk SLSA Provenance referrers back to hop 0 (REG=<registry>)
+    silent: true
+    vars:
+      REG: '{{.REG | default .AIRGAP_REG}}'
+    cmds:
+      - |
+        echo
+        echo "Walking provenance chain on {{.REG}} (offline, by digest)..."
+        echo
+
+        digest=$(oras manifest fetch --plain-http \
+          {{.REG}}/component-descriptors/{{.COMPONENT_NAME}}:{{.COMPONENT_VERSION}} --descriptor \
+          | jq -r .digest)
+
+        while [ -n "$digest" ]; do
+          echo "manifest: $digest"
+          att_digest=$(oras discover --plain-http --format json \
+            {{.REG}}/component-descriptors/{{.COMPONENT_NAME}}@$digest \
+            | jq -r '.manifests[]? | select(.artifactType=="application/vnd.in-toto+json") | .digest' \
+            | head -1)
+          if [ -z "$att_digest" ]; then
+            echo "  (no in-toto attestation — reached hop 0)"
+            echo
+            break
+          fi
+          echo "  attestation: $att_digest"
+          tmp=$(mktemp -d)
+          oras pull --plain-http -o "$tmp" \
+            {{.REG}}/component-descriptors/{{.COMPONENT_NAME}}@$att_digest >/dev/null
+          dsse=$(ls "$tmp"/*.dsse.json 2>/dev/null | head -1)
+          [ -z "$dsse" ] && dsse=$(ls "$tmp"/*.json | head -1)
+          jq -r '.payload' "$dsse" | base64 -d | jq '{
+            buildType:    .predicate.buildDefinition.buildType,
+            hop:          .predicate.buildDefinition.externalParameters.hop,
+            rewrite:      .predicate.buildDefinition.externalParameters.rewriteRule,
+            builder:      .predicate.runDetails.builder.id,
+            subject:      .subject[0].name,
+            resolvedDeps: [.predicate.buildDefinition.resolvedDependencies[] | {uri, digest}]
+          }'
+          # Step to the previous hop's manifest digest (carried into this registry).
+          digest=$(jq -r '.payload' "$dsse" | base64 -d \
+            | jq -r '.predicate.buildDefinition.resolvedDependencies[0].digest.sha256')
+          digest="sha256:$digest"
+          rm -rf "$tmp"
+          echo
+        done
+
+        echo "Chain walked entirely against {{.REG}} — no access to upstream registries needed."
+
+  chain-diff:
+    desc: Diff chart-values bytes between hops (HOP=N compares hop N-1 vs hop N). Reads from local workspace; truly-airgap chain-diff requires OCM digest-based component resolution (see proposal).
+    silent: true
+    vars:
+      HOP: '{{.HOP | default "1"}}'
+    cmds:
+      - |
+        prev=$(({{.HOP}} - 1))
+        echo "Diff chart-values: hop$prev vs hop{{.HOP}}"
+        if [ {{.HOP}} = "1" ]; then
+          left={{.COMP}}/hop0/values.yaml
+        else
+          left={{.COMP}}/hop$prev/values.yaml
+        fi
+        diff -u "$left" {{.COMP}}/hop{{.HOP}}/values.yaml || true
+
+  # ─── Reusable building blocks ───────────────────────────────────────────
+
+  hop-prepare:
+    internal: true
+    requires:
+      vars: [HOP_DIR, PROVIDER, IMAGE_REPO, IMAGE_REF]
+    silent: true
+    cmds:
+      - mkdir -p {{.COMP}}/{{.HOP_DIR}}
+      - |
+        if [ "{{.KEEP_VALUES}}" != "true" ]; then
+          IMAGE_REPO='{{.IMAGE_REPO}}' IMAGE_TAG='{{.IMAGE_TAG}}' \
+            envsubst < {{.TPL}}/values.yaml.tmpl > {{.COMP}}/{{.HOP_DIR}}/values.yaml
+        fi
+      - |
+        COMPONENT_NAME='{{.COMPONENT_NAME}}' COMPONENT_VERSION='{{.COMPONENT_VERSION}}' \
+        PROVIDER='{{.PROVIDER}}' IMAGE_REF='{{.IMAGE_REF}}' \
+          envsubst < {{.TPL}}/component-constructor.yaml.tmpl \
+          > {{.COMP}}/{{.HOP_DIR}}/component-constructor.yaml
+
+  hop-add-cv:
+    internal: true
+    requires: {vars: [HOP_DIR]}
+    silent: true
+    cmds:
+      - rm -rf {{.OUT}}/{{.HOP_DIR}}.ctf
+      - ocm add cv --repository ctf::{{.OUT}}/{{.HOP_DIR}}.ctf --constructor {{.COMP}}/{{.HOP_DIR}}/component-constructor.yaml
+
+  hop-transfer-cv:
+    internal: true
+    requires: {vars: [HOP_DIR, TARGET_REG]}
+    silent: true
+    cmds:
+      - ocm transfer cv --copy-resources --upload-as ociArtifact ctf::{{.OUT}}/{{.HOP_DIR}}.ctf//{{.COMPONENT_NAME}}:{{.COMPONENT_VERSION}} oci::http://{{.TARGET_REG}}
+
+  hop-sign:
+    internal: true
+    requires: {vars: [SIGNER, REG]}
+    silent: true
+    cmds:
+      - cp {{.TPL}}/rsa-signer.yaml {{.OUT}}/{{.SIGNER}}-signer.yaml
+      - |
+        HOP='{{.SIGNER}}' KEYS='{{.KEYS}}' \
+          envsubst < {{.TPL}}/ocmconfig.yaml.tmpl > {{.OUT}}/{{.SIGNER}}-ocmconfig.yaml
+      - ocm sign cv --signer-spec {{.OUT}}/{{.SIGNER}}-signer.yaml --signature {{.SIGNER}} --config {{.OUT}}/{{.SIGNER}}-ocmconfig.yaml oci::http://{{.REG}}//{{.COMPONENT_NAME}}:{{.COMPONENT_VERSION}}
+      - 'echo "Attached {{.SIGNER}} signature to {{.REG}}//{{.COMPONENT_NAME}}:{{.COMPONENT_VERSION}}"'
+
+  hop-verify:
+    internal: true
+    requires: {vars: [SIGNER, REG]}
+    silent: true
+    cmds:
+      - |
+        HOP='{{.SIGNER}}' KEYS='{{.KEYS}}' \
+          envsubst < {{.TPL}}/ocmconfig.yaml.tmpl > {{.OUT}}/{{.SIGNER}}-ocmconfig.yaml
+      - ocm verify cv --signature {{.SIGNER}} --config {{.OUT}}/{{.SIGNER}}-ocmconfig.yaml oci::http://{{.REG}}//{{.COMPONENT_NAME}}:{{.COMPONENT_VERSION}}
+      - 'echo "OK — {{.SIGNER}} signature verifies on {{.REG}}."'
+
+  hop-rewrite:
+    internal: true
+    requires: {vars: [HOP_DIR, SOURCE_REG, OLD_REPO, NEW_REPO]}
+    silent: true
+    cmds:
+      - mkdir -p {{.COMP}}/{{.HOP_DIR}}
+      - ocm download resource oci::http://{{.SOURCE_REG}}//{{.COMPONENT_NAME}}:{{.COMPONENT_VERSION}} --identity name=chart-values --output {{.COMP}}/{{.HOP_DIR}}/values.original.yaml
+      - sed 's|{{.OLD_REPO}}|{{.NEW_REPO}}|' {{.COMP}}/{{.HOP_DIR}}/values.original.yaml > {{.COMP}}/{{.HOP_DIR}}/values.yaml
+      - 'echo "Rewrote {{.OLD_REPO}} -> {{.NEW_REPO}}. Diff:"'
+      - diff {{.COMP}}/{{.HOP_DIR}}/values.original.yaml {{.COMP}}/{{.HOP_DIR}}/values.yaml || true
+
+  hop-attest:
+    internal: true
+    requires:
+      vars: [HOP, SIGNER, PREV_REG, THIS_REG, BUILDER_ID, OLD_REPO, NEW_REPO]
+    silent: true
+    cmds:
+      - mkdir -p {{.ATT}}
+      - |
+        SUBJECT_DIGEST=$(oras manifest fetch --plain-http {{.THIS_REG}}/component-descriptors/{{.COMPONENT_NAME}}:{{.COMPONENT_VERSION}} --descriptor | jq -r '.digest | sub("^sha256:"; "")')
+        PREV_DIGEST=$(oras manifest fetch --plain-http {{.PREV_REG}}/component-descriptors/{{.COMPONENT_NAME}}:{{.COMPONENT_VERSION}} --descriptor | jq -r '.digest | sub("^sha256:"; "")')
+        export SUBJECT_DIGEST PREV_DIGEST
+        export HOP='{{.HOP}}'
+        export PREV_REG='{{.PREV_REG}}'
+        export THIS_REG='{{.THIS_REG}}'
+        export OLD_REPO='{{.OLD_REPO}}'
+        export NEW_REPO='{{.NEW_REPO}}'
+        export COMPONENT_NAME='{{.COMPONENT_NAME}}'
+        export COMPONENT_VERSION='{{.COMPONENT_VERSION}}'
+        export BUILDER_ID='{{.BUILDER_ID}}'
+        export COMPONENT_FQN="{{.COMPONENT_NAME}}:{{.COMPONENT_VERSION}}@{{.THIS_REG}}"
+        envsubst < {{.TPL}}/provenance.json.tmpl > {{.ATT}}/hop{{.HOP}}.statement.json
+      - 'echo "Statement: {{.ATT}}/hop{{.HOP}}.statement.json"'
+      - jq . {{.ATT}}/hop{{.HOP}}.statement.json
+      - |
+        cosign attest-blob \
+          --predicate {{.ATT}}/hop{{.HOP}}.statement.json \
+          --type slsaprovenance1 \
+          --key {{.KEYS}}/{{.SIGNER}}-cosign.key \
+          --new-bundle-format=false \
+          --use-signing-config=false \
+          --tlog-upload=false \
+          --output-attestation {{.ATT}}/hop{{.HOP}}.dsse.json \
+          --yes \
+          {{.ATT}}/hop{{.HOP}}.statement.json >/dev/null
+      - 'echo "DSSE envelope: {{.ATT}}/hop{{.HOP}}.dsse.json"'
+      - |
+        oras attach --plain-http \
+          --disable-path-validation \
+          --artifact-type application/vnd.in-toto+json \
+          {{.THIS_REG}}/component-descriptors/{{.COMPONENT_NAME}}:{{.COMPONENT_VERSION}} \
+          {{.ATT}}/hop{{.HOP}}.dsse.json:application/vnd.dsse.envelope.v1+json
+      - 'echo "Attached as referrer of {{.THIS_REG}}/.../{{.COMPONENT_NAME}}:{{.COMPONENT_VERSION}}. Discover:"'
+      - 'echo "  oras discover --plain-http {{.THIS_REG}}/component-descriptors/{{.COMPONENT_NAME}}:{{.COMPONENT_VERSION}}"'
+
+  hop-carry-chain:
+    # Copy prior-hop component manifests + their referrers (DSSE attestations)
+    # into THIS_REG by digest, so chain-walk works without access to the
+    # source registries. Required for airgap consumers.
+    internal: true
+    requires: {vars: [THIS_REG, ANCESTORS]}
+    silent: true
+    cmds:
+      - |
+        for src in {{.ANCESTORS}}; do
+          digest=$(oras manifest fetch --plain-http \
+            $src/component-descriptors/{{.COMPONENT_NAME}}:{{.COMPONENT_VERSION}} \
+            --descriptor | jq -r .digest)
+          echo "Carrying $src@$digest -> {{.THIS_REG}}"
+          oras cp --recursive --from-plain-http --to-plain-http \
+            $src/component-descriptors/{{.COMPONENT_NAME}}@$digest \
+            {{.THIS_REG}}/component-descriptors/{{.COMPONENT_NAME}}@$digest
+        done
+        echo "Prior-hop manifests + referrers now reachable on {{.THIS_REG}} by digest."
+
+  # ─── Lifecycle ──────────────────────────────────────────────────────────
+
+  teardown:
+    desc: Stop the registry containers (keeps generated state)
+    silent: true
+    cmds:
+      - docker stop mock-vendor-reg mock-corp-reg mock-airgap-reg 2>/dev/null || true
+      - 'echo "Registries stopped. Files under {{.ROOT}} preserved."'
+
+  clean:
+    desc: Stop registries and remove all generated state
+    cmds:
+      - task: teardown
+      - rm -rf {{.KEYS}} {{.COMP}} {{.OUT}} {{.ATT}}
+      - 'echo "Clean."'

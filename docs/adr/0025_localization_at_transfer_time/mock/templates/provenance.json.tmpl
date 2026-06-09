@@ -1,0 +1,27 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [{
+    "name": "${COMPONENT_FQN}",
+    "digest": { "sha256": "${SUBJECT_DIGEST}" }
+  }],
+  "predicateType": "https://slsa.dev/provenance/v1",
+  "predicate": {
+    "buildDefinition": {
+      "buildType": "https://ocm.software/transfer/localize/v1",
+      "externalParameters": {
+        "hop":         ${HOP},
+        "sourceReg":   "${PREV_REG}",
+        "targetReg":   "${THIS_REG}",
+        "rewriteRule": "image.repository: ${OLD_REPO} -> ${NEW_REPO}"
+      },
+      "resolvedDependencies": [{
+        "uri":    "oci://${PREV_REG}/component-descriptors/${COMPONENT_NAME}:${COMPONENT_VERSION}",
+        "digest": { "sha256": "${PREV_DIGEST}" }
+      }]
+    },
+    "runDetails": {
+      "builder": { "id": "${BUILDER_ID}" },
+      "metadata": { "invocationId": "mock-hop-${HOP}" }
+    }
+  }
+}

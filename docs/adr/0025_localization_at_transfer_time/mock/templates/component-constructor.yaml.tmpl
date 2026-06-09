@@ -1,0 +1,18 @@
+components:
+  - name: ${COMPONENT_NAME}
+    version: ${COMPONENT_VERSION}
+    provider:
+      name: ${PROVIDER}
+    resources:
+      - name: chart-values
+        type: blob
+        version: ${COMPONENT_VERSION}
+        input:
+          type: file
+          path: ./values.yaml
+      - name: app-image
+        type: ociImage
+        version: ${COMPONENT_VERSION}
+        access:
+          type: ociArtifact
+          imageReference: ${IMAGE_REF}

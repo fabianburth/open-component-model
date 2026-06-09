@@ -1,0 +1,2 @@
+type: RSASigningConfiguration/v1alpha1
+signatureAlgorithm: RSASSA-PSS

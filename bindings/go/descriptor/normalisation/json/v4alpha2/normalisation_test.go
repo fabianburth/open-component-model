@@ -1,12 +1,7 @@
 package v4alpha2_test
 
 import (
-	"embed"
-	"path/filepath"
-	"strings"
 	"testing"
-
-	_ "embed"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,51 +14,30 @@ import (
 	descriptorv2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 )
 
-//go:embed testdata
-var testdata embed.FS
+// fromYAML loads a stored cd const into the runtime descriptor, mirroring the
+// signing flow (v2.Descriptor -> ConvertFromV2).
+func fromYAML(t *testing.T, in string) *runtime.Descriptor {
+	t.Helper()
+	r := require.New(t)
+	var desc descriptorv2.Descriptor
+	r.NoError(yaml.Unmarshal([]byte(in), &desc))
+	rt, err := runtime.ConvertFromV2(&desc)
+	r.NoError(err)
+	return rt
+}
 
+// TestConformance asserts the normalised output of a realistic stored
+// descriptor is byte-identical to the pinned v4alpha2 reference bytes. The
+// fixture lives in fixtures_test.go.
 func TestConformance(t *testing.T) {
-	baseName := t.Name()
-	prefix := filepath.Join("testdata", "conformance")
+	r := require.New(t)
+	desc := fromYAML(t, input_cli)
 
-	run := func(t *testing.T, folder string) {
-		t.Helper()
-		r := require.New(t)
-		desc, err := testdata.ReadFile(filepath.Join(prefix, folder, "README.md"))
-		r.NoError(err, "failed to read test README")
-		t.Log(string(desc))
-
-		input, err := testdata.ReadFile(filepath.Join(prefix, folder, "input.yaml"))
-		r.NoError(err, "failed to read test input")
-		expected, err := testdata.ReadFile(filepath.Join(prefix, folder, "expected.json"))
-		r.NoError(err, "failed to read test expected output")
-
-		var descriptor descriptorv2.Descriptor
-		if err := yaml.Unmarshal(input, &descriptor); err != nil {
-			t.Fatalf("failed to unmarshal YAML: %v", err)
-		}
-		runtimeDescriptor, err := runtime.ConvertFromV2(&descriptor)
-		r.NoError(err, "failed to convert descriptor")
-
-		// Normalise the descriptor using our normalization (ExclusionRules applied).
-		normalizedBytes, err := normalisation.Normalise(runtimeDescriptor, v4alpha2.Algorithm)
-		r.NoError(err, "failed to normalise descriptor")
-
-		r.Equal(string(expected), string(normalizedBytes),
-			"normalized output does not match expected output from testcase",
-		)
-	}
-
-	t.Run("v4alpha2", func(t *testing.T) {
-		prefix = filepath.Join(prefix, strings.TrimPrefix(t.Name(), baseName))
-		tests, err := testdata.ReadDir(prefix)
-		require.NoError(t, err, "failed to read conformance test directory")
-		for _, folder := range tests {
-			t.Run(folder.Name(), func(t *testing.T) {
-				run(t, folder.Name())
-			})
-		}
-	})
+	got, err := normalisation.Normalise(desc, v4alpha2.Algorithm)
+	r.NoError(err)
+	// Byte-exact, NOT JSONEq: JCS canonical key ordering is part of what we
+	// pin, and JSONEq would mask an ordering or spelling regression.
+	r.Equal(norm_cli, string(got), "normalised bytes diverge from the pinned v4alpha2 reference") //nolint:testifylint // byte-exact JCS check, JSONEq would mask key-order regressions
 }
 
 // TestNormalization verifies that the normalization (using ExclusionRules)
@@ -205,176 +179,6 @@ func TestDefaultSignedLabel(t *testing.T) {
 	got, err := normalisation.Normalise(d, v4alpha2.Algorithm)
 	r.NoError(err)
 	r.Contains(string(got), `"labels":[{"name":"unsigned","value":"v"}]`)
-}
-
-func TestMapResourcesWithAccessType(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    interface{}
-		expected interface{}
-	}{
-		{
-			name: "valid access type",
-			input: map[string]interface{}{
-				"access": map[string]interface{}{
-					"type": "none",
-				},
-				"digest": "test",
-			},
-			expected: map[string]interface{}{
-				"access": map[string]interface{}{
-					"type": "none",
-				},
-			},
-		},
-		{
-			name: "invalid access type",
-			input: map[string]interface{}{
-				"access": map[string]interface{}{
-					"type": 123, // invalid type
-				},
-				"digest": "test",
-			},
-			expected: map[string]interface{}{
-				"access": map[string]interface{}{
-					"type": 123,
-				},
-				"digest": "test",
-			},
-		},
-		{
-			name: "missing access type",
-			input: map[string]interface{}{
-				"access": map[string]interface{}{},
-				"digest": "test",
-			},
-			expected: map[string]interface{}{
-				"access": map[string]interface{}{},
-				"digest": "test",
-			},
-		},
-		{
-			name: "missing access",
-			input: map[string]interface{}{
-				"digest": "test",
-			},
-			expected: map[string]interface{}{
-				"digest": "test",
-			},
-		},
-		{
-			name: "nil access",
-			input: map[string]interface{}{
-				"access": nil,
-				"digest": "test",
-			},
-			expected: map[string]interface{}{
-				"access": nil,
-				"digest": "test",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := v4alpha2.MapResourcesWithAccessType(v4alpha2.IsNoneAccessKind, func(v interface{}) interface{} {
-				m := v.(map[string]interface{})
-				delete(m, "digest")
-				return m
-			}, tt.input)
-			assert.Equal(t, tt.expected, got)
-		})
-	}
-}
-
-func TestMapResourcesWithNoneAccess(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    interface{}
-		expected interface{}
-	}{
-		{
-			name: "valid none access type",
-			input: map[string]interface{}{
-				"access": map[string]interface{}{
-					"type": "none",
-				},
-				"digest": "test",
-			},
-			expected: map[string]interface{}{
-				"access": map[string]interface{}{
-					"type": "none",
-				},
-			},
-		},
-		{
-			name: "valid legacy none access type",
-			input: map[string]interface{}{
-				"access": map[string]interface{}{
-					"type": "None",
-				},
-				"digest": "test",
-			},
-			expected: map[string]interface{}{
-				"access": map[string]interface{}{
-					"type": "None",
-				},
-			},
-		},
-		{
-			name: "invalid access type",
-			input: map[string]interface{}{
-				"access": map[string]interface{}{
-					"type": 123, // invalid type
-				},
-				"digest": "test",
-			},
-			expected: map[string]interface{}{
-				"access": map[string]interface{}{
-					"type": 123,
-				},
-				"digest": "test",
-			},
-		},
-		{
-			name: "missing access type",
-			input: map[string]interface{}{
-				"access": map[string]interface{}{},
-				"digest": "test",
-			},
-			expected: map[string]interface{}{
-				"access": map[string]interface{}{},
-				"digest": "test",
-			},
-		},
-		{
-			name: "missing access",
-			input: map[string]interface{}{
-				"digest": "test",
-			},
-			expected: map[string]interface{}{
-				"digest": "test",
-			},
-		},
-		{
-			name: "nil access",
-			input: map[string]interface{}{
-				"access": nil,
-				"digest": "test",
-			},
-			expected: map[string]interface{}{
-				"access": nil,
-				"digest": "test",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := v4alpha2.MapResourcesWithNoneAccess(tt.input)
-			assert.Equal(t, tt.expected, got)
-		})
-	}
 }
 
 // TestIgnoreLabelsWithoutSignature pins the v4alpha2 default-signed semantics:

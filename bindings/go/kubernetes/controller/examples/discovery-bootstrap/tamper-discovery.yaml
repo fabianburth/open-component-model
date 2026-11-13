@@ -1,0 +1,9 @@
+# Tamper demo: a fresh Discovery of the umbrella the bootstrap already resolved. It walks the whole graph,
+# anchors every child to the reference digest of its signed parent and fails closed on any mismatch.
+apiVersion: delivery.ocm.software/v1alpha1
+kind: Discovery
+metadata:
+  name: discovery-bootstrap-recheck
+spec:
+  componentRef:
+    name: discovery-bootstrap-component

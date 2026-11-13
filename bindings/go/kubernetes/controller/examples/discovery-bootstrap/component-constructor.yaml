@@ -1,0 +1,57 @@
+# Umbrella component of the discovery-bootstrap example: the kro RGD that deploys the application plus
+# references to the two application components. Only this root is signed; the reference digests minted by
+# `ocm add cv` commit the signature to every child descriptor and, through their resource digests, to every
+# chart and image.
+components:
+  - name: ocm.software/ocm-k8s-toolkit/examples/discovery-bootstrap
+    version: "1.0.0"
+    provider:
+      name: ocm.software
+    resources:
+      - name: kro-rgd
+        type: blob
+        version: "1.0.0"
+        input:
+          type: File/v1
+          path: ./rgd.yaml
+    componentReferences:
+      - name: frontend
+        componentName: ocm.software/ocm-k8s-toolkit/examples/discovery-bootstrap/frontend
+        version: "1.0.0"
+      - name: backend
+        componentName: ocm.software/ocm-k8s-toolkit/examples/discovery-bootstrap/backend
+        version: "1.0.0"
+  - name: ocm.software/ocm-k8s-toolkit/examples/discovery-bootstrap/frontend
+    version: "1.0.0"
+    provider:
+      name: ocm.software
+    resources:
+      - name: chart
+        type: helmChart
+        version: "6.9.1"
+        access:
+          type: OCIImage/v1
+          imageReference: "ghcr.io/stefanprodan/charts/podinfo:6.9.1@sha256:565d310746f1fa4be7f93ba7965bb393153a2d57a15cfe5befc909b790a73f8a"
+      - name: image
+        type: ociImage
+        version: "6.9.1"
+        access:
+          type: OCIImage/v1
+          imageReference: "ghcr.io/stefanprodan/podinfo:6.9.1@sha256:262578cde928d5c9eba3bce079976444f624c13ed0afb741d90d5423877496cb"
+  - name: ocm.software/ocm-k8s-toolkit/examples/discovery-bootstrap/backend
+    version: "1.0.0"
+    provider:
+      name: ocm.software
+    resources:
+      - name: chart
+        type: helmChart
+        version: "6.8.0"
+        access:
+          type: OCIImage/v1
+          imageReference: "ghcr.io/stefanprodan/charts/podinfo:6.8.0@sha256:2360bdf32ddc50c05f8e128118173343b0a012a338daf145b16e0da9c80081a4"
+      - name: image
+        type: ociImage
+        version: "6.8.0"
+        access:
+          type: OCIImage/v1
+          imageReference: "ghcr.io/stefanprodan/podinfo:6.8.0@sha256:6c1975b871efb327528c84d46d38e6dd7906eecee6402bc270eeb7f1b1a506df"

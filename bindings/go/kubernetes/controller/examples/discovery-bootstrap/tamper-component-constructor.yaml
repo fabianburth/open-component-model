@@ -1,0 +1,21 @@
+# Tamper demo: the frontend component republished at the SAME version, with its image swapped for another
+# one and without re-signing the umbrella. The umbrella's reference digest for frontend no longer matches.
+components:
+  - name: ocm.software/ocm-k8s-toolkit/examples/discovery-bootstrap/frontend
+    version: "1.0.0"
+    provider:
+      name: ocm.software
+    resources:
+      - name: chart
+        type: helmChart
+        version: "6.9.1"
+        access:
+          type: OCIImage/v1
+          imageReference: "ghcr.io/stefanprodan/charts/podinfo:6.9.1@sha256:565d310746f1fa4be7f93ba7965bb393153a2d57a15cfe5befc909b790a73f8a"
+      - name: image
+        type: ociImage
+        version: "6.9.1"
+        access:
+          type: OCIImage/v1
+          # not the image the umbrella was signed with
+          imageReference: "ghcr.io/stefanprodan/podinfo:6.8.0@sha256:6c1975b871efb327528c84d46d38e6dd7906eecee6402bc270eeb7f1b1a506df"

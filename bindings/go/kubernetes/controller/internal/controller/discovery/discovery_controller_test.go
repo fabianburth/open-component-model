@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -27,6 +28,7 @@ import (
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/api/v1alpha1"
 	internaldiscovery "ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/discovery"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/ocm"
+	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/resolution"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/setup"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/status"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/test"
@@ -60,6 +62,7 @@ func newReconciler(t *testing.T, objs ...client.Object) (*Reconciler, client.Cli
 			EventRecorder:    record.NewFakeRecorder(100),
 			NewPluginManager: test.StaticPluginManager(nil),
 		},
+		Resolver: resolution.NewResolver(new(logr.Discard())),
 	}
 	return r, fakeClient
 }
@@ -304,6 +307,7 @@ func TestUpToDate(t *testing.T) {
 		d.Status.ObservedGeneration = 3
 		d.Status.ObservedComponentDigest = key
 		d.Status.Components = []apiextensionsv1.JSON{}
+		d.Status.Resources = []v1alpha1.DiscoveredResource{}
 		if mutate != nil {
 			mutate(d)
 		}
@@ -328,6 +332,9 @@ func TestUpToDate(t *testing.T) {
 		{"no payload published", discovery(func(d *v1alpha1.Discovery) {
 			d.Status.Components = nil
 		}), info("abc"), false},
+		{"no resources published", discovery(func(d *v1alpha1.Discovery) {
+			d.Status.Resources = nil
+		}), info("abc"), false},
 		{"digest changed", discovery(nil), info("def"), false},
 		{"component has no digest", discovery(nil), info(""), false},
 	} {
@@ -351,7 +358,7 @@ func TestSetPayloadRejectsOversizedPayload(t *testing.T) {
 	discovery := &v1alpha1.Discovery{}
 	discovery.Status.Components = []apiextensionsv1.JSON{{Raw: []byte(`{"kept":true}`)}}
 
-	err := rec.setPayload(discovery, oversized)
+	err := rec.setPayload(discovery, oversized, nil)
 	r.ErrorIs(err, errPayloadTooLarge)
 	r.ErrorContains(err, "limit is")
 	r.Equal([]apiextensionsv1.JSON{{Raw: []byte(`{"kept":true}`)}}, discovery.Status.Components,
@@ -363,14 +370,28 @@ func TestSetPayloadRejectsOversizedPayload(t *testing.T) {
 	for range 3 {
 		records = append(records, map[string]any{"blob": string(big)})
 	}
-	r.ErrorIs(rec.setPayload(discovery, &internaldiscovery.Payload{Extracted: records}), errPayloadTooLarge)
+	r.ErrorIs(rec.setPayload(discovery, &internaldiscovery.Payload{Extracted: records}, nil), errPayloadTooLarge)
 	r.Nil(discovery.Status.Extracted)
 
 	// A payload under the limit is written.
 	small := &internaldiscovery.Payload{Components: []json.RawMessage{json.RawMessage(`{"ok":true}`)}}
 	discovery = &v1alpha1.Discovery{}
-	r.NoError(rec.setPayload(discovery, small))
+	r.NoError(rec.setPayload(discovery, small, []v1alpha1.DiscoveredResource{}))
 	r.Len(discovery.Status.Components, 1)
+	r.NotNil(discovery.Status.Resources)
+
+	// Published resources count towards the same limit.
+	discovery = &v1alpha1.Discovery{}
+	resources := make([]v1alpha1.DiscoveredResource, 0, 3)
+	for range 3 {
+		resources = append(resources, v1alpha1.DiscoveredResource{Resource: v1alpha1.ResourceInfo{
+			Name:   "blob",
+			Access: apiextensionsv1.JSON{Raw: []byte(fmt.Sprintf("{\"blob\":%q}", big))},
+		}})
+	}
+	r.ErrorIs(rec.setPayload(discovery, small, resources), errPayloadTooLarge)
+	r.Nil(discovery.Status.Components)
+	r.Nil(discovery.Status.Resources)
 }
 
 // TestMapComponentToDiscoveries pins the root-reference routing: a Component

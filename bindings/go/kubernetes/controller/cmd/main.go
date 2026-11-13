@@ -371,6 +371,7 @@ func main() {
 			NewPluginManager: newPluginManager,
 			RateLimit:        discoveryRateLimit,
 		},
+		Resolver: resolver,
 	}).SetupWithManager(ctx, mgr, discoveryConcurrency); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Discovery")
 		os.Exit(1)

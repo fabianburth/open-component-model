@@ -12,7 +12,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	desc "ocm.software/open-component-model/bindings/go/descriptor/runtime"
-	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/api/v1alpha1"
 	ocirepository "ocm.software/open-component-model/bindings/go/oci/repository"
 	"ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/ctf"
@@ -42,30 +41,6 @@ func ctfRepoAt(t *testing.T, dir string, descs ...*desc.Descriptor) []byte {
 	return raw
 }
 
-func digestedRef(name, component, version, value string) desc.Reference {
-	ref := makeRef(name, component, version)
-	ref.Digest = desc.Digest{
-		HashAlgorithm:          "SHA-256",
-		NormalisationAlgorithm: "jsonNormalisation/v4alpha1",
-		Value:                  value,
-	}
-
-	return ref
-}
-
-func componentWithDigest(name, namespace, component, version string, repoSpec []byte, value string) *v1alpha1.Component {
-	c := readyComponentWithSpec(name, namespace, component, version, repoSpec)
-	if value != "" {
-		c.Status.Component.Digest = &v2.Digest{
-			HashAlgorithm:          "SHA-256",
-			NormalisationAlgorithm: "jsonNormalisation/v4alpha1",
-			Value:                  value,
-		}
-	}
-
-	return c
-}
-
 func discoveryFor(componentName, namespace string) *v1alpha1.Discovery {
 	return &v1alpha1.Discovery{
 		ObjectMeta: metav1.ObjectMeta{Name: "discovery", Namespace: namespace},
@@ -83,12 +58,13 @@ func TestReconcile_UnchangedRootDigestSkipsTraversal(t *testing.T) {
 	const ns = "default"
 
 	dir := t.TempDir()
-	child := makeDescriptor("ocm.software/child", "1.0.0")
-	root := makeDescriptor("ocm.software/root", "1.0.0",
-		digestedRef("child", "ocm.software/child", "1.0.0", "childdigest"))
-	repoSpec := ctfRepoAt(t, dir, root, child)
+	f := newCTFFixtureAt(t, dir)
+	f.add(t, makeDescriptor("ocm.software/child", "1.0.0"))
+	f.add(t, makeDescriptor("ocm.software/root", "1.0.0",
+		anchoredRef("child", "ocm.software/child", "1.0.0", f.digest(t, "ocm.software/child", "1.0.0"))))
 
-	component := componentWithDigest("component", ns, root.Component.Name, root.Component.Version, repoSpec, "rootdigest")
+	component := readyComponentWithSpec("component", ns, "ocm.software/root", "1.0.0", f.spec)
+	component.Status.Component.Digest = f.digest(t, "ocm.software/root", "1.0.0")
 	discovery := discoveryFor(component.Name, ns)
 	rec, c := realPluginReconciler(t, component, discovery)
 	key := client.ObjectKeyFromObject(discovery)
@@ -130,12 +106,14 @@ func TestReconcile_MissingReferenceDigestForcesFullTraversal(t *testing.T) {
 	const ns = "default"
 
 	dir := t.TempDir()
-	child := makeDescriptor("ocm.software/child", "1.0.0")
-	root := makeDescriptor("ocm.software/root", "1.0.0",
-		makeRef("child", "ocm.software/child", "1.0.0")) // no digest
-	repoSpec := ctfRepoAt(t, dir, root, child)
+	f := newCTFFixtureAt(t, dir)
+	f.add(t,
+		makeDescriptor("ocm.software/child", "1.0.0"),
+		makeDescriptor("ocm.software/root", "1.0.0", makeRef("child", "ocm.software/child", "1.0.0")), // no digest
+	)
 
-	component := componentWithDigest("component", ns, root.Component.Name, root.Component.Version, repoSpec, "rootdigest")
+	component := readyComponentWithSpec("component", ns, "ocm.software/root", "1.0.0", f.spec)
+	component.Status.Component.Digest = f.digest(t, "ocm.software/root", "1.0.0")
 	discovery := discoveryFor(component.Name, ns)
 	rec, c := realPluginReconciler(t, component, discovery)
 	key := client.ObjectKeyFromObject(discovery)

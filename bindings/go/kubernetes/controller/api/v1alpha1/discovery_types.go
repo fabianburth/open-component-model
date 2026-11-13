@@ -91,10 +91,14 @@ type DiscoverySpec struct {
 	// +optional
 	Source *DiscoverySource `json:"source,omitempty"`
 
-	// VerificationPolicy controls whether the discovered graph is verified.
-	// Always (default): verify every component version and resource digest of
-	// the discovered graph before publishing status.resources.
-	// Never: skip verification unconditionally.
+	// VerificationPolicy controls whether the resources in status.resources
+	// are verified. Every component version of the discovered graph is checked
+	// against the digest that reaches it regardless, as on a Resource: the
+	// root against the digest of the Component, every other component version
+	// against the digest its parent reference records.
+	// Always (default): verify the content of every published resource against
+	// its digest and pin its access to the verified digest.
+	// Never: publish the resources as their descriptors declare them.
 	// +kubebuilder:validation:Enum:="Always";"Never"
 	// +kubebuilder:default:="Always"
 	// +optional
@@ -206,10 +210,11 @@ type DiscoveryStatus struct {
 	// +optional
 	Extracted []ExtractedRecord `json:"extracted,omitzero"`
 
-	// Resources contains every resource of the discovered graph. It is
-	// published once the graph is verified (or verification is disabled),
-	// independently of spec.extract and of the selectors. A computed but
-	// empty result is an empty list; an uncomputed result is absent.
+	// Resources contains every resource that survives the selectors, sorted
+	// by component name, component version and resource identity. It is
+	// published once the graph is verified (or resource verification is
+	// disabled), independently of spec.extract. A computed but empty result
+	// is an empty list; an uncomputed result is absent.
 	// +optional
 	Resources []DiscoveredResource `json:"resources,omitzero"`
 

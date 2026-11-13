@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,33 +19,35 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	genericv1 "ocm.software/open-component-model/bindings/go/configuration/generic/v1/spec"
-	"ocm.software/open-component-model/bindings/go/credentials"
 	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/api/v1alpha1"
 	internaldiscovery "ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/discovery"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/event"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/ocm"
-	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/setup"
+	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/resolution"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/status"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/util"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/pkg/configuration"
-	ocirepository "ocm.software/open-component-model/bindings/go/oci/spec/repository"
-	"ocm.software/open-component-model/bindings/go/repository/component/resolvers"
 	"ocm.software/open-component-model/bindings/go/runtime"
 )
 
 // Reconciler reconciles Discovery objects: it resolves the complete
-// transitive component graph of the referenced ready Component, evaluates the
-// compiled selector/extraction query against it, and atomically publishes the
-// resulting payload and conditions into the Discovery status.
+// transitive component graph of the referenced ready Component, anchors every
+// descriptor to the digest that reaches it, evaluates the compiled
+// selector/extraction query against it, verifies the surviving resources, and
+// atomically publishes the resulting payload, resources and conditions into
+// the Discovery status.
 //
 // The request-scoped plugin manager is built with the reconcile context so
 // cancellation propagates into plugin calls. Repository access happens
-// through a request-scoped resolver rooted at the referenced Component's
+// through the shared Resolver, rooted at the referenced Component's
 // repository spec.
 type Reconciler struct {
 	*ocm.BaseReconciler
+
+	// Resolver fetches and verifies component versions through the shared,
+	// cached repository resolvers.
+	Resolver *resolution.Resolver
 }
 
 var _ ocm.Reconciler = (*Reconciler)(nil)
@@ -149,7 +152,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 // status in memory. Status publication happens separately in Reconcile.
 //
 // The following errors are Terminal: selector and extraction compilation and
-// evaluation and payload to large. The rest, backoff.
+// evaluation and payload to large. The rest, backoff, including descriptor
+// and resource verification failures: they fail closed and keep the last
+// published payload.
 //
 //nolint:funlen,cyclop // the pipeline is intentionally linear; splitting it would obscure the failure-semantics
 func (r *Reconciler) reconcile(ctx context.Context, discovery *v1alpha1.Discovery) (ctrl.Result, error) {
@@ -208,11 +213,7 @@ func (r *Reconciler) reconcile(ctx context.Context, discovery *v1alpha1.Discover
 		return ctrl.Result{}, fmt.Errorf("failed to load configurations: %w", err)
 	}
 
-	var genericCfg *genericv1.Config
-	if cfg != nil {
-		genericCfg = cfg.Config
-	}
-	pm, err := r.NewPluginManager(ctx, genericCfg)
+	pm, err := r.PluginManagerFor(ctx, cfg)
 	if err != nil {
 		status.MarkNotReady(r.EventRecorder, discovery, v1alpha1.GetConfigurationFailedReason, err.Error())
 
@@ -226,33 +227,23 @@ func (r *Reconciler) reconcile(ctx context.Context, discovery *v1alpha1.Discover
 		return ctrl.Result{}, fmt.Errorf("failed to decode repository spec: %w", err)
 	}
 
-	var credentialGraph credentials.Resolver
-	if cfg != nil {
-		credentialGraph, err = setup.NewCredentialGraph(ctx, cfg.Config, setup.CredentialGraphOptions{
-			PluginManager: pm,
-			Logger:        &logger,
-		})
-		if err != nil {
-			status.MarkNotReady(r.EventRecorder, discovery, v1alpha1.GetRepositoryFailedReason, err.Error())
-
-			return ctrl.Result{}, fmt.Errorf("failed to create credential graph: %w", err)
-		}
-	}
-
-	resolver, err := resolvers.NewFromConfig(ctx, genericCfg, ocirepository.Scheme, resolvers.Options{
-		RepoProvider:      pm.ComponentVersionRepositoryRegistry,
-		CredentialGraph:   credentialGraph,
+	// The root pattern routes the root to the repository the Component
+	// resolved it from, ahead of any configured resolver.
+	resolveOpts := &resolution.Options{
+		RepositorySpec:    spec,
+		Configuration:     cfg,
+		PluginManager:     pm,
 		ComponentPatterns: []string{info.Component},
-	}, spec)
+	}
+	resolver, err := r.Resolver.RepositoryResolver(ctx, resolveOpts)
 	if err != nil {
 		status.MarkNotReady(r.EventRecorder, discovery, v1alpha1.GetRepositoryFailedReason, err.Error())
 
 		return ctrl.Result{}, fmt.Errorf("failed to create repository resolver: %w", err)
 	}
 
-	graph, err := internaldiscovery.Traverse(ctx,
-		internaldiscovery.ComponentKey{Name: info.Component, Version: info.Version},
-		resolver)
+	root := internaldiscovery.ComponentKey{Name: info.Component, Version: info.Version}
+	graph, err := internaldiscovery.Traverse(ctx, root, resolver)
 	if err != nil {
 		status.MarkNotReady(r.EventRecorder, discovery, v1alpha1.ResolutionFailedReason, err.Error())
 
@@ -260,11 +251,33 @@ func (r *Reconciler) reconcile(ctx context.Context, discovery *v1alpha1.Discover
 	}
 	logger.V(1).Info("resolved transitive component graph", "components", len(graph.Descriptors))
 
+	// The Component verified the root signature; anchoring every descriptor to
+	// the digest that reaches it extends that trust to the whole graph.
+	anchors, unanchored, err := internaldiscovery.Anchor(ctx, *graph, root, info.Digest, resolution.VerifyDigest)
+	if err != nil {
+		status.MarkNotReady(r.EventRecorder, discovery, v1alpha1.GetComponentVersionFailedReason, err.Error())
+
+		return ctrl.Result{}, fmt.Errorf("failed to verify the component graph: %w", err)
+	}
+	if len(unanchored) > 0 {
+		event.New(r.EventRecorder, discovery, nil, v1alpha1.EventSeverityError,
+			"%s: %s", resolution.ErrNotSafelyDigestible, strings.Join(unanchored, "; "))
+	}
+
 	filtered, err := query.Filter(ctx, *graph)
 	if err != nil {
 		status.MarkAsStalled(r.EventRecorder, discovery, v1alpha1.SelectorFailedReason, err.Error())
 
 		return ctrl.Result{}, reconcile.TerminalError(err)
+	}
+
+	verified := -1
+	if discovery.Spec.VerificationPolicy != v1alpha1.VerificationPolicyNever {
+		if verified, err = r.verifyResources(ctx, filtered, resolveOpts, cfg); err != nil {
+			status.MarkNotReady(r.EventRecorder, discovery, v1alpha1.GetOCMResourceFailedReason, err.Error())
+
+			return ctrl.Result{}, fmt.Errorf("failed to verify resources: %w", err)
+		}
 	}
 
 	payload, err := query.Project(ctx, filtered)
@@ -274,7 +287,14 @@ func (r *Reconciler) reconcile(ctx context.Context, discovery *v1alpha1.Discover
 		return ctrl.Result{}, reconcile.TerminalError(err)
 	}
 
-	if err := r.setPayload(discovery, payload); err != nil {
+	resources, err := discoveredResources(filtered, anchors, info.RepositorySpec)
+	if err != nil {
+		status.MarkAsStalled(r.EventRecorder, discovery, v1alpha1.MarshalFailedReason, err.Error())
+
+		return ctrl.Result{}, reconcile.TerminalError(err)
+	}
+
+	if err := r.setPayload(discovery, payload, resources); err != nil {
 		reason := v1alpha1.MarshalFailedReason
 		if errors.Is(err, errPayloadTooLarge) {
 			reason = v1alpha1.PayloadTooLargeReason
@@ -289,7 +309,7 @@ func (r *Reconciler) reconcile(ctx context.Context, discovery *v1alpha1.Discover
 		discovery.Status.ObservedComponentDigest = digestKey(info.Digest)
 	}
 
-	status.MarkReady(r.EventRecorder, discovery, "%s", payloadMessage(payload))
+	status.MarkReady(r.EventRecorder, discovery, "%s, %s", payloadMessage(payload), verificationMessage(verified))
 	// Discovery advances the observed generation here because it does not use
 	// the shared UpdateBeforePatch defer the other controllers rely on.
 	discovery.SetObservedGeneration(discovery.GetGeneration())
@@ -306,12 +326,26 @@ const maxPayloadBytes = 1 << 20
 // errPayloadTooLarge happens if the status would be too large to store.
 var errPayloadTooLarge = errors.New("status payload exceeds the size limit")
 
-// setPayload swaps the status payload in one in-memory update: the selected
-// field is set (possibly to an empty list), the other field is cleared. If the payload
-// was too large, return errPayloadTooLarge instead so we can surface that and set
-// the object to Ready=False.
-func (r *Reconciler) setPayload(discovery *v1alpha1.Discovery, payload *internaldiscovery.Payload) error {
-	var size int
+// setPayload swaps the status payload in one in-memory update: resources are
+// set, the selected payload field is set (possibly to an empty list), the
+// other field is cleared. If the payload was too large, return
+// errPayloadTooLarge instead and leave the status untouched, so we can surface
+// that and set the object to Ready=False.
+func (r *Reconciler) setPayload(
+	discovery *v1alpha1.Discovery,
+	payload *internaldiscovery.Payload,
+	resources []v1alpha1.DiscoveredResource,
+) error {
+	if resources == nil {
+		resources = []v1alpha1.DiscoveredResource{}
+	}
+	raw, err := json.Marshal(resources)
+	if err != nil {
+		return fmt.Errorf("failed to marshal resources: %w", err)
+	}
+	// this is a rough estimate, but is enough for our purposes.
+	size := len(raw)
+
 	if payload.Extracted != nil {
 		records := make([]v1alpha1.ExtractedRecord, 0, len(payload.Extracted))
 		for _, record := range payload.Extracted {
@@ -321,18 +355,18 @@ func (r *Reconciler) setPayload(discovery *v1alpha1.Discovery, payload *internal
 				if err != nil {
 					return fmt.Errorf("failed to marshal extracted field %q: %w", name, err)
 				}
-				// this is a rough estimate, but is enough for our purposes.
 				size += len(name) + len(raw)
 				typed[name] = apiextensionsv1.JSON{Raw: raw}
 			}
 			records = append(records, typed)
 		}
 		if size > maxPayloadBytes {
-			return fmt.Errorf("%w: %d extracted records total %d bytes, limit is %d",
-				errPayloadTooLarge, len(records), size, maxPayloadBytes)
+			return fmt.Errorf("%w: %d extracted records and %d resources total %d bytes, limit is %d",
+				errPayloadTooLarge, len(records), len(resources), size, maxPayloadBytes)
 		}
 		discovery.Status.Extracted = records
 		discovery.Status.Components = nil
+		discovery.Status.Resources = resources
 
 		return nil
 	}
@@ -343,11 +377,12 @@ func (r *Reconciler) setPayload(discovery *v1alpha1.Discovery, payload *internal
 		components = append(components, apiextensionsv1.JSON{Raw: raw})
 	}
 	if size > maxPayloadBytes {
-		return fmt.Errorf("%w: %d descriptors total %d bytes, limit is %d",
-			errPayloadTooLarge, len(components), size, maxPayloadBytes)
+		return fmt.Errorf("%w: %d descriptors and %d resources total %d bytes, limit is %d",
+			errPayloadTooLarge, len(components), len(resources), size, maxPayloadBytes)
 	}
 	discovery.Status.Components = components
 	discovery.Status.Extracted = nil
+	discovery.Status.Resources = resources
 
 	return nil
 }
@@ -368,6 +403,9 @@ func upToDate(discovery *v1alpha1.Discovery, info v1alpha1.ComponentInfo) bool {
 		return false
 	}
 	if discovery.Status.Components == nil && discovery.Status.Extracted == nil {
+		return false
+	}
+	if discovery.Status.Resources == nil {
 		return false
 	}
 	ready := status.FindCondition(discovery, v1alpha1.ReadyCondition)
@@ -398,6 +436,16 @@ func payloadMessage(payload *internaldiscovery.Payload) string {
 	}
 
 	return fmt.Sprintf("discovery succeeded with %d results", resultCount(payload))
+}
+
+// verificationMessage reports how many resources were verified; a negative
+// count means verification was skipped.
+func verificationMessage(verified int) string {
+	if verified < 0 {
+		return "resource verification skipped (verificationPolicy Never)"
+	}
+
+	return fmt.Sprintf("verified %d resources", verified)
 }
 
 func resultCount(payload *internaldiscovery.Payload) int {

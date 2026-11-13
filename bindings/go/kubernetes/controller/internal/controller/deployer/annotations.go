@@ -25,7 +25,7 @@ const (
 	annotationComponentVersion = "component.delivery.ocm.software/version"
 )
 
-func setOwnershipAnnotations(obj client.Object, resource *deliveryv1alpha1.Resource) {
+func setOwnershipAnnotations(obj client.Object, component *deliveryv1alpha1.ComponentInfo, resource *deliveryv1alpha1.ResourceInfo) {
 	anns := map[string]string{}
 	if existing := obj.GetAnnotations(); existing != nil {
 		anns = existing
@@ -35,19 +35,19 @@ func setOwnershipAnnotations(obj client.Object, resource *deliveryv1alpha1.Resou
 	}()
 
 	// Set the annotations for the resource identity and digest.
-	anns[annotationResourceIdentityPrefix+"name"] = resource.Status.Resource.Name
-	anns[annotationResourceIdentityPrefix+"version"] = resource.Status.Resource.Version
-	for key, value := range resource.Status.Resource.ExtraIdentity {
+	anns[annotationResourceIdentityPrefix+"name"] = resource.Name
+	anns[annotationResourceIdentityPrefix+"version"] = resource.Version
+	for key, value := range resource.ExtraIdentity {
 		anns[annotationResourceIdentityPrefix+key] = value
 	}
-	if resource.Status.Resource.Digest != nil {
-		anns[annotationResourceDigestPrefix+"value"] = resource.Status.Resource.Digest.Value
-		anns[annotationResourceDigestPrefix+"hashAlgorithm"] = resource.Status.Resource.Digest.HashAlgorithm
-		anns[annotationResourceDigestPrefix+"normalisationAlgorithm"] = resource.Status.Resource.Digest.NormalisationAlgorithm
+	if resource.Digest != nil {
+		anns[annotationResourceDigestPrefix+"value"] = resource.Digest.Value
+		anns[annotationResourceDigestPrefix+"hashAlgorithm"] = resource.Digest.HashAlgorithm
+		anns[annotationResourceDigestPrefix+"normalisationAlgorithm"] = resource.Digest.NormalisationAlgorithm
 	}
-	anns[annotationResourceAccess] = string(resource.Status.Resource.Access.Raw)
-	anns[annotationComponentName] = resource.Status.Component.Component
-	anns[annotationComponentVersion] = resource.Status.Component.Version
+	anns[annotationResourceAccess] = string(resource.Access.Raw)
+	anns[annotationComponentName] = component.Component
+	anns[annotationComponentVersion] = component.Version
 }
 
 // setApplySetMetadata sets the labels and annotations from the applyset.Metadata

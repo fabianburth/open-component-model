@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"golang.org/x/sync/errgroup"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -133,11 +134,11 @@ func (r *Reconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, con
 	r.restConfig = mgr.GetConfig()
 
 	// Build index for deployers that reference a resource to get notified about resource changes.
-	const fieldName = ".spec.resourceRef"
+	const resourceRefField = ".spec.resourceRef"
 	if err := mgr.GetFieldIndexer().IndexField(
 		ctx,
 		r.newObject(),
-		fieldName,
+		resourceRefField,
 		func(obj client.Object) []string {
 			deployer, ok := obj.(deliveryv1alpha1.DeployerObject)
 			if !ok {
@@ -158,47 +159,39 @@ func (r *Reconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, con
 		For(r.newObject(), builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		WatchesRawSource(informerManager.Source()).
 		// Watch for events from OCM resources that are referenced by the deployer
-		Watches(
-			&deliveryv1alpha1.Resource{},
-			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
-				resource, ok := obj.(*deliveryv1alpha1.Resource)
-				if !ok {
-					return []reconcile.Request{}
-				}
-
-				// Get list of deployers that reference the resource
-				list := r.newList()
-				if err := r.List(
-					ctx,
-					list,
-					client.MatchingFields{fieldName: client.ObjectKeyFromObject(resource).String()},
-				); err != nil {
-					return []reconcile.Request{}
-				}
-
-				// For every deployer that references the resource create a reconciliation request for that deployer
-				var requests []reconcile.Request
-				if err := meta.EachListItem(list, func(obj k8sruntime.Object) error {
-					deployer, ok := obj.(client.Object)
-					if !ok {
-						return nil
-					}
-					requests = append(requests, reconcile.Request{
-						NamespacedName: client.ObjectKeyFromObject(deployer),
-					})
-
-					return nil
-				}); err != nil {
-					return []reconcile.Request{}
-				}
-
-				return requests
-			})).
+		Watches(&deliveryv1alpha1.Resource{}, r.enqueueReferencingDeployers(resourceRefField)).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: concurrency,
 			RateLimiter:             r.RateLimit.Limiter(),
 		}).
 		Complete(r)
+}
+
+// enqueueReferencingDeployers enqueues the deployers whose indexed field references the changed object.
+func (r *Reconciler) enqueueReferencingDeployers(field string) handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+		list := r.newList()
+		if err := r.List(ctx, list, client.MatchingFields{field: client.ObjectKeyFromObject(obj).String()}); err != nil {
+			return []reconcile.Request{}
+		}
+
+		var requests []reconcile.Request
+		if err := meta.EachListItem(list, func(obj k8sruntime.Object) error {
+			deployer, ok := obj.(client.Object)
+			if !ok {
+				return nil
+			}
+			requests = append(requests, reconcile.Request{
+				NamespacedName: client.ObjectKeyFromObject(deployer),
+			})
+
+			return nil
+		}); err != nil {
+			return []reconcile.Request{}
+		}
+
+		return requests
+	})
 }
 
 func (r *Reconciler) setupDynamicResourceWatcherWithManager(mgr ctrl.Manager) (*dynamic.InformerManager, error) {
@@ -387,56 +380,30 @@ func (r *Reconciler) reconcileDeployment(ctx context.Context, deployer deliveryv
 		return ctrl.Result{}, err
 	}
 
-	cfg, err := r.resolveConfiguration(ctx, deployer, resource)
+	cfg, pm, err := r.configure(ctx, deployer, resource)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
-	pm, err := r.PluginManagerFor(ctx, cfg)
-	if err != nil {
-		status.MarkNotReady(r.EventRecorder, deployer, deliveryv1alpha1.GetConfigurationFailedReason, err.Error())
-
-		return ctrl.Result{}, fmt.Errorf("failed to create plugin manager: %w", err)
-	}
-
-	repoResolver, err := r.createRepositoryResolver(ctx, deployer, resource, cfg, pm)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
-	componentDescriptor, matchedResource, err := r.resolveComponentAndMatchResource(ctx, deployer, resource, cfg, pm)
+	d, err := r.loadEntry(ctx, deployer, &entry{
+		owner:     resource,
+		component: resource.Status.Component,
+		resource:  resource.Status.Resource,
+		identity:  resource.Spec.Resource.ByReference.Resource,
+		componentDescriptor: func(ctx context.Context, cfg *configuration.Configuration, pm *manager.PluginManager) (*descriptor.Descriptor, error) {
+			return r.getEffectiveComponentDescriptor(ctx, deployer, resource, cfg, pm)
+		},
+	}, cfg, pm)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
-	key := buildResourceCacheKey(matchedResource, componentDescriptor, cfg, resource.Spec.Resource.ByReference.Resource.String())
-
-	objs, err := r.DownloadCache.Load(key, func() ([]*unstructured.Unstructured, error) {
-		return r.DownloadResourceWithOCM(ctx, repoResolver, componentDescriptor, matchedResource, cfg, pm)
-	})
-	if err != nil {
-		status.MarkNotReady(r.EventRecorder, deployer, deliveryv1alpha1.GetOCMResourceFailedReason, err.Error())
-
-		return ctrl.Result{}, fmt.Errorf("failed to download resource from OCM or retrieve it from the cache: %w", err)
+	if err := r.deploy(ctx, deployer, []deployable{d}); err != nil {
+		return ctrl.Result{}, err
 	}
-
-	if err = r.applyWithApplySet(ctx, resource, deployer, objs); err != nil {
-		status.MarkNotReady(r.EventRecorder, deployer, deliveryv1alpha1.ApplyFailed, err.Error())
-
-		return ctrl.Result{}, fmt.Errorf("failed to apply resources: %w", err)
-	}
-
-	// Track the applied objects for the dynamic informer manager
-	if err = r.trackConcurrently(ctx, deployer, objs); err != nil {
-		status.MarkNotReady(r.EventRecorder, deployer, deliveryv1alpha1.ResourceNotSynced, err.Error())
-
-		return ctrl.Result{}, fmt.Errorf("failed to sync deployed resources: %w", err)
-	}
-
-	updateDeployedObjectStatusReferences(objs, deployer)
 
 	status.MarkReady(r.EventRecorder, deployer, "Applied %s:%s, resource %s",
-		componentDescriptor.Component.Name, componentDescriptor.Component.Version, matchedResource.Name)
+		d.componentDescriptor.Component.Name, d.componentDescriptor.Component.Version, d.resource.Name)
 
 	return ctrl.Result{}, nil
 }
@@ -492,7 +459,7 @@ func (r *Reconciler) resolveResource(
 func (r *Reconciler) resolveConfiguration(
 	ctx context.Context,
 	deployer deliveryv1alpha1.DeployerObject,
-	resource *deliveryv1alpha1.Resource,
+	parent deliveryv1alpha1.ConfigRefProvider,
 ) (*configuration.Configuration, error) {
 	if err := r.validateConfigNamespaces(deployer, deployer.GetSpecifiedOCMConfig()); err != nil {
 		status.MarkNotReady(r.EventRecorder, deployer, deliveryv1alpha1.GetConfigurationFailedReason, err.Error())
@@ -500,14 +467,14 @@ func (r *Reconciler) resolveConfiguration(
 		return nil, err
 	}
 
-	configs, err := ocm.GetEffectiveConfig(ctx, r.GetClient(), deployer, resource)
+	configs, err := ocm.GetEffectiveConfig(ctx, r.GetClient(), deployer, parent)
 	if err != nil {
 		status.MarkNotReady(r.EventRecorder, deployer, deliveryv1alpha1.GetConfigurationFailedReason, err.Error())
 
 		return nil, fmt.Errorf("failed to get effective config: %w", err)
 	}
 
-	// Configuration propagated from the Resource may still point to other namespaces.
+	// Configuration propagated from the Resource or Discovery may still point to other namespaces.
 	if err := r.validateConfigNamespaces(deployer, configs); err != nil {
 		status.MarkNotReady(r.EventRecorder, deployer, deliveryv1alpha1.GetConfigurationFailedReason, err.Error())
 
@@ -525,16 +492,17 @@ func (r *Reconciler) resolveConfiguration(
 	return cfg, nil
 }
 
-// createRepositoryResolver creates an OCM repository resolver from the resource's repository spec.
+// createRepositoryResolver creates an OCM repository resolver from the entry's repository spec.
 func (r *Reconciler) createRepositoryResolver(
 	ctx context.Context,
 	deployer deliveryv1alpha1.DeployerObject,
-	resource *deliveryv1alpha1.Resource,
+	e *entry,
 	cfg *configuration.Configuration,
 	pm *manager.PluginManager,
 ) (resolvers.ComponentVersionRepositoryResolver, error) {
-	repoSpec := &ocmruntime.Raw{}
-	if err := repoSpec.UnmarshalJSON(resource.Status.Component.RepositorySpec.Raw); err != nil {
+	repoSpec, err := decodeRepositorySpec(e.component.RepositorySpec)
+	if err != nil {
+		err = e.wrap(err)
 		status.MarkNotReady(r.GetEventRecorder(), deployer, deliveryv1alpha1.GetRepositoryFailedReason, err.Error())
 
 		return nil, fmt.Errorf("failed to decode repository spec: %w", err)
@@ -546,6 +514,7 @@ func (r *Reconciler) createRepositoryResolver(
 		PluginManager:  pm,
 	})
 	if err != nil {
+		err = e.wrap(err)
 		status.MarkNotReady(r.GetEventRecorder(), deployer, deliveryv1alpha1.GetRepositoryFailedReason, err.Error())
 
 		return nil, fmt.Errorf("failed to create repository resolver: %w", err)
@@ -554,15 +523,31 @@ func (r *Reconciler) createRepositoryResolver(
 	return repoResolver, nil
 }
 
+func decodeRepositorySpec(spec *apiextensionsv1.JSON) (*ocmruntime.Raw, error) {
+	if spec == nil {
+		return nil, errors.New("repository spec is empty")
+	}
+
+	repoSpec := &ocmruntime.Raw{}
+	if err := repoSpec.UnmarshalJSON(spec.Raw); err != nil {
+		return nil, err
+	}
+
+	return repoSpec, nil
+}
+
 // resolveComponentAndMatchResource resolves the component descriptor and finds the matching resource within it.
 func (r *Reconciler) resolveComponentAndMatchResource(
 	ctx context.Context,
 	deployer deliveryv1alpha1.DeployerObject,
-	resource *deliveryv1alpha1.Resource,
+	e *entry,
 	cfg *configuration.Configuration,
 	pm *manager.PluginManager,
 ) (*descriptor.Descriptor, *descriptor.Resource, error) {
-	componentDescriptor, err := r.getEffectiveComponentDescriptor(ctx, deployer, resource, cfg, pm)
+	componentDescriptor, err := e.componentDescriptor(ctx, cfg, pm)
+	if err != nil {
+		err = e.wrap(err)
+	}
 	switch {
 	case errors.Is(err, ErrComponentVersionDrift):
 		status.MarkNotReady(r.EventRecorder, deployer, deliveryv1alpha1.ComponentDriftResolutionInProgress, err.Error())
@@ -579,7 +564,7 @@ func (r *Reconciler) resolveComponentAndMatchResource(
 		}
 	}
 
-	resourceIdentity := resource.Spec.Resource.ByReference.Resource
+	resourceIdentity := e.identity
 	var matchedResource *descriptor.Resource
 	for i, res := range componentDescriptor.Component.Resources {
 		resIdentity := res.ToIdentity()
@@ -590,8 +575,8 @@ func (r *Reconciler) resolveComponentAndMatchResource(
 	}
 
 	if matchedResource == nil {
-		err = fmt.Errorf("resource with identity %v not found in component %s:%s",
-			resourceIdentity, componentDescriptor.Component.Name, componentDescriptor.Component.Version)
+		err = e.wrap(fmt.Errorf("resource with identity %v not found in component %s:%s",
+			resourceIdentity, componentDescriptor.Component.Name, componentDescriptor.Component.Version))
 		status.MarkNotReady(r.EventRecorder, deployer, deliveryv1alpha1.GetOCMResourceFailedReason, err.Error())
 
 		return nil, nil, err
@@ -888,7 +873,7 @@ func (r *Reconciler) createApplySet(c client.Client, deployer deliveryv1alpha1.D
 // - All deployed resources are labeled with applyset.k8s.io/part-of=<applyset-id>
 // - The deployer carries annotations tracking the GroupKinds and namespaces of managed resources
 // - Pruning automatically removes resources that were previously deployed but are no longer in the manifest
-func (r *Reconciler) applyWithApplySet(ctx context.Context, resource *deliveryv1alpha1.Resource, deployer deliveryv1alpha1.DeployerObject, objs []*unstructured.Unstructured) error {
+func (r *Reconciler) applyWithApplySet(ctx context.Context, deployer deliveryv1alpha1.DeployerObject, deployables []deployable) error {
 	logger := log.FromContext(ctx).WithValues("deployer", deployer.GetName(), "namespace", deployer.GetNamespace())
 
 	applyClient, err := r.applyClient(ctx, deployer)
@@ -900,42 +885,44 @@ func (r *Reconciler) applyWithApplySet(ctx context.Context, resource *deliveryv1
 	// This allows us to track all resources deployed by this deployer
 	set := r.createApplySet(applyClient, deployer, logger)
 
-	logger.Info("adding objects to ApplySet", "count", len(objs))
-
-	resourcesToAdd := make([]applyset.Resource, 0, len(objs))
+	var resourcesToAdd []applyset.Resource
 	// Add all objects to the ApplySet
-	for _, obj := range objs {
-		// Clone the object to avoid modifying the original
-		obj := obj.DeepCopy()
+	for _, d := range deployables {
+		logger.Info("adding objects to ApplySet", "count", len(d.objs), "resource", d.entry.resource.Name)
 
-		// Set ownership labels and annotations (preserving existing behavior)
-		setOwnershipLabels(obj, resource, deployer, r.managedBy())
-		logger.Info("set ownership labels", "labels", obj.GetLabels())
-		setOwnershipAnnotations(obj, resource)
-		logger.Info("set ownership annotations", "annotations", obj.GetAnnotations())
+		for _, obj := range d.objs {
+			// Clone the object to avoid modifying the original
+			obj := obj.DeepCopy()
 
-		// Default namespace and apiVersion if needed
-		namespaced, err := r.defaultObj(ctx, obj, r.defaultNamespace(deployer))
-		if err != nil {
-			return fmt.Errorf("failed to default object %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
-		}
+			// Set ownership labels and annotations (preserving existing behavior)
+			setOwnershipLabels(obj, d.entry.owner, d.entry.resource.Version, deployer, r.managedBy())
+			logger.Info("set ownership labels", "labels", obj.GetLabels())
+			setOwnershipAnnotations(obj, d.entry.component, d.entry.resource)
+			logger.Info("set ownership annotations", "annotations", obj.GetAnnotations())
 
-		if r.Namespaced {
-			setNamespacedDeployerAnnotation(obj, deployer)
-		}
-
-		// Set controller reference
-		if r.canOwn(deployer, obj, namespaced) {
-			if err := controllerutil.SetControllerReference(deployer, obj, r.Scheme, r.ownerReferenceOptions()...); err != nil {
-				return fmt.Errorf("failed to set controller reference on object %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
+			// Default namespace and apiVersion if needed
+			namespaced, err := r.defaultObj(ctx, obj, r.defaultNamespace(deployer))
+			if err != nil {
+				return fmt.Errorf("failed to default object %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
 			}
-		}
 
-		resourcesToAdd = append(resourcesToAdd, applyset.Resource{
-			ID:        obj.GetName(),
-			Object:    obj,
-			SkipApply: false,
-		})
+			if r.Namespaced {
+				setNamespacedDeployerAnnotation(obj, deployer)
+			}
+
+			// Set controller reference
+			if r.canOwn(deployer, obj, namespaced) {
+				if err := controllerutil.SetControllerReference(deployer, obj, r.Scheme, r.ownerReferenceOptions()...); err != nil {
+					return fmt.Errorf("failed to set controller reference on object %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
+				}
+			}
+
+			resourcesToAdd = append(resourcesToAdd, applyset.Resource{
+				ID:        obj.GetName(),
+				Object:    obj,
+				SkipApply: false,
+			})
+		}
 	}
 
 	logger.Info("projecting ApplySet and set deployer metadata")

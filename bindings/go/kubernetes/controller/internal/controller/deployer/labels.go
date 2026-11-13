@@ -3,8 +3,6 @@ package deployer
 import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	deliveryv1alpha1 "ocm.software/open-component-model/bindings/go/kubernetes/controller/api/v1alpha1"
 )
 
 // see https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/#labels
@@ -24,7 +22,8 @@ const (
 )
 
 // These are common labels.
-func setOwnershipLabels(obj client.Object, resource *deliveryv1alpha1.Resource, deployer client.Object, managedBy string) {
+// owner is the Resource or Discovery the deployed resource is read from, version the version of the deployed resource.
+func setOwnershipLabels(obj client.Object, owner client.Object, version string, deployer client.Object, managedBy string) {
 	limit := func(v string) string {
 		if len(v) > validation.LabelValueMaxLength {
 			return v[:validation.LabelValueMaxLength]
@@ -43,14 +42,14 @@ func setOwnershipLabels(obj client.Object, resource *deliveryv1alpha1.Resource, 
 		obj.SetLabels(lbls)
 	}()
 
-	// the component within the architecture is always the name of the resource in k8s.
-	lbls[componentLabel] = limit(resource.GetName())
-	// the name of the deployed object is the name of the resource in k8s
-	lbls[nameLabel] = limit(resource.GetName())
+	// the component within the architecture is always the name of the owner in k8s.
+	lbls[componentLabel] = limit(owner.GetName())
+	// the name of the deployed object is the name of the owner in k8s
+	lbls[nameLabel] = limit(owner.GetName())
 	// the version of the resource determines the version of the deployed object.
-	lbls[versionLabel] = limit(resource.Status.Resource.Version)
-	// the actual resource instance also determines the object instance.
-	lbls[instanceLabel] = limit(string(resource.GetUID()))
+	lbls[versionLabel] = limit(version)
+	// the actual owner instance also determines the object instance.
+	lbls[instanceLabel] = limit(string(owner.GetUID()))
 	// the name of the higher level component the object is part of is always the deployer.
 	lbls[partOfLabel] = limit(deployer.GetName())
 	// the object is managed by the controller of the deployer's kind.

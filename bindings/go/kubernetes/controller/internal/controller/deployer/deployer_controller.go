@@ -133,7 +133,7 @@ func (r *Reconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, con
 	r.apiReader = mgr.GetAPIReader()
 	r.restConfig = mgr.GetConfig()
 
-	// Build index for deployers that reference a resource to get notified about resource changes.
+	// Build indexes for deployers that reference a resource or a discovery to get notified about their changes.
 	const resourceRefField = ".spec.resourceRef"
 	if err := mgr.GetFieldIndexer().IndexField(
 		ctx,
@@ -141,7 +141,7 @@ func (r *Reconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, con
 		resourceRefField,
 		func(obj client.Object) []string {
 			deployer, ok := obj.(deliveryv1alpha1.DeployerObject)
-			if !ok {
+			if !ok || deployer.GetDiscoveryRef() != nil {
 				return nil
 			}
 
@@ -155,11 +155,29 @@ func (r *Reconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, con
 		return err
 	}
 
+	const discoveryRefField = ".spec.discoveryRef"
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		r.newObject(),
+		discoveryRefField,
+		func(obj client.Object) []string {
+			deployer, ok := obj.(deliveryv1alpha1.DeployerObject)
+			if !ok || deployer.GetDiscoveryRef() == nil {
+				return nil
+			}
+
+			return []string{discoveryKey(deployer).String()}
+		},
+	); err != nil {
+		return err
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(r.newObject(), builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		WatchesRawSource(informerManager.Source()).
-		// Watch for events from OCM resources that are referenced by the deployer
+		// Watch for events from OCM resources and discoveries that are referenced by the deployer
 		Watches(&deliveryv1alpha1.Resource{}, r.enqueueReferencingDeployers(resourceRefField)).
+		Watches(&deliveryv1alpha1.Discovery{}, r.enqueueReferencingDeployers(discoveryRefField)).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: concurrency,
 			RateLimiter:             r.RateLimit.Limiter(),
@@ -375,6 +393,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 // reconcileDeployment orchestrates the main deployment pipeline: resolve the referenced resource,
 // load configuration, download the OCM resource, apply it, and track the deployed objects.
 func (r *Reconciler) reconcileDeployment(ctx context.Context, deployer deliveryv1alpha1.DeployerObject) (ctrl.Result, error) {
+	if deployer.GetDiscoveryRef() != nil {
+		return r.reconcileDiscoveryDeployment(ctx, deployer)
+	}
+
 	resource, err := r.resolveResource(ctx, deployer)
 	if resource == nil || err != nil {
 		return ctrl.Result{}, err

@@ -8,7 +8,8 @@ A signed application, bootstrapped onto a cluster with **two objects**: one `Dis
 - **What** — selectors pick resources out of the whole component graph. Every surviving resource is verified
   against the signed root and published in `status.resources`, its access pinned to the verified digest.
 - **How** — a `NamespacedDeployer` applies the resources of a Discovery; a kro RGD consumes another Discovery's
-  `status.resources` with `forEach`.
+  `status.resources` with `forEach`. The Deployer takes only the selection from the status: it re-verifies the
+  root signature itself and resolves every resource from the root along its `referencePath`.
 
 ```mermaid
 flowchart LR
@@ -118,11 +119,12 @@ k get discovery,repository,component,namespaceddeployer,rgd
 k get discoverybootstrap,ocirepository,helmrelease,deployment
 ```
 
-What the application Discovery verified, with the access pinned to the digest:
+What the application Discovery verified, with the reference path from the root and the access pinned to the
+digest:
 
 ```bash
 k get discovery discovery-bootstrap-payload \
-  -o jsonpath='{range .status.resources[*]}{.component.component}{" "}{.resource.name}{"\n  "}{.resource.access.imageReference}{"\n"}{end}'
+  -o jsonpath='{range .status.resources[*]}{.component.component}{" "}{.resource.name}{" via "}{.referencePath[*].name}{"\n  "}{.resource.access.imageReference}{"\n"}{end}'
 ```
 
 The RGD is part of the NamespacedDeployer's ApplySet and records where it came from:
@@ -207,10 +209,11 @@ k delete secret discovery-bootstrap-ocmconfig
 
 ## e2e
 
-From the repository root, after the setup above:
+From the repository root, after the setup above. The tamper step republishes a component version, which needs
+the `ocm` CLI of this checkout (an older `ocm` on the `PATH` refuses to replace it):
 
 ```bash
-task bindings/go/kubernetes/controller:test/e2e -- --focus=discovery-bootstrap
+OCM_CLI=$PWD/bindings/go/cli/tmp/bin/ocm task bindings/go/kubernetes/controller:test/e2e -- --focus=discovery-bootstrap
 ```
 
 `test/e2e/e2e_discovery_test.go` runs steps 1 to 4: both HelmReleases Ready, pods localized and pinned to a

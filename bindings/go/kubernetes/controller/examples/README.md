@@ -35,6 +35,7 @@ when you point an example at a TLS registry.
 | [`k8s-manifest-simple`](#k8s-manifest-simple) | `NamespacedDeployer` | Applying a plain Kubernetes manifest from an OCM resource |
 | [`k8s-manifest-cross-namespace`](#k8s-manifest-cross-namespace) | `NamespacedDeployer` | Applying into a second namespace that granted the deployer's service account |
 | [`applyset-pruning`](#applyset-pruning) | `NamespacedDeployer` | Pruning orphaned resources with ApplySet |
+| [`discovery-bootstrap`](discovery-bootstrap/README.md) | `NamespacedDeployer` + FluxCD | Two-object bootstrap with a `Discovery`: verified, digest-pinned resources, kro `forEach`, tamper demo |
 
 All examples except `helm-simple-nested-status` deploy with the `NamespacedDeployer`, which applies with the
 permissions of a service account defined in the example's bootstrap. The RGD examples bind that service account

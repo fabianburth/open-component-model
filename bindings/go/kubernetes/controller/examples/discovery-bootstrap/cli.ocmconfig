@@ -1,0 +1,11 @@
+# ocm CLI config for the README walkthrough (the cluster side uses the ocm-plain-http ConfigMap instead).
+type: generic.config.ocm.software/v1
+configurations:
+  # The kind registry serves plain HTTP; ghcr.io, where the charts and images come from, does not.
+  - type: http.config.ocm.software/v1alpha1
+    plainHTTP: true
+    hosts:
+      ghcr.io:
+        plainHTTP: false
+  # `transfer --copy-resources` uploads charts and images next to the component (localization).
+  - type: oci.uploader.transfer.config.ocm.software/v1alpha1

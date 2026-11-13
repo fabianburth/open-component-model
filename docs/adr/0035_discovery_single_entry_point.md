@@ -7,7 +7,8 @@
 **Technical Story**: Users treat `Discovery` combined with KRO as their one stop shop: it consumes many resources
 without one `Resource` CR each. Two gaps stand in the way. `Discovery` does not verify what it outputs, and it
 still needs a hand-wired `Repository` and `Component` underneath. This ADR decides where `Discovery` sits in the
-controller's layering, how it establishes trust, and how it obtains its root component version.
+controller's layering, how it establishes trust, how it obtains its root component version, and how deployment
+and bootstrap build on it.
 
 ## Context and Problem Statement
 
@@ -40,6 +41,10 @@ Its `Ready` means "the query ran", not "the content is what was signed". Consume
 **Entry point.** A working `Discovery` needs three authored objects: `Repository`, `Component` and `Discovery`.
 Users who want one object end up writing a KRO definition just to wire them together.
 
+**Bootstrap.** The `Deployer` applies exactly one `Resource`, typically an RGD shipped in the component. Getting
+that first RGD into a cluster takes four hand-written objects (`Repository`, `Component`, `Resource`,
+`Deployer`), and deploying several artifacts of a component needs one `Resource` and one `Deployer` each.
+
 ## Decision Drivers
 
 * Same integrity guarantees, however a resource is consumed: what is deployed must be what was signed.
@@ -66,7 +71,7 @@ from a component graph, verify them, publish them. A `Resource` is the case of o
   pinned output makes skipping it safe.
 * **Cons**: cost follows the *selected* set, not the set actually used downstream. Access types that can only be
   verified by download (git, GitHub, S3, Helm or wget without a checksum) are expensive. One failing resource
-  fails the whole `Discovery`. Two CRDs overlap at the consumption layer until `Resource`'s future is decided.
+  fails the whole `Discovery`. Two CRDs overlap at the consumption layer (resolved in Part 3).
 
 ### Option T2: Discovery plans, generated Resource CRs verify
 
@@ -136,10 +141,61 @@ instance.
 * **Cons**: requires KRO. The composition is versioned separately from the CRDs, and the hand-wiring is only
   moved into a definition OCM maintains, not removed.
 
+## Part 3: Deployment and Bootstrap
+
+Ordering is out of scope for all options: like today's `Deployer`, an applied set has no ordering. Compositions
+that need it use KRO.
+
+### Option D1: Deployer keeps applying one Resource (status quo)
+
+* **Pros**: no change.
+* **Cons**: bootstrap needs four objects. N artifacts need N `Resource` and N `Deployer` objects. Keeps two
+  consumption primitives.
+
+### Option D2: Deployer with an inline source
+
+The `Deployer` takes an inline `source` plus a resource identity and generates `Repository`, `Component` and
+`Resource`.
+
+* **Pros**: one object for bootstrap.
+* **Cons**: bootstrap stays a special path, limited to one artifact. The `Deployer` generates the whole stack, and
+  both consumption primitives remain.
+
+### Option D3: Deployer applies a Discovery
+
+The three questions get one primitive each:
+
+| Question | Primitive |
+| --- | --- |
+| **Where** is the trusted version? | `Repository`, `Component` |
+| **What** is consumed from it? | `Discovery` |
+| **How** does it get into the cluster? | `Deployer` |
+
+* `Discovery` always publishes a controller-owned `status.resources[]`. Each entry has exactly the shape of
+  today's `Resource` status (`component`: repository, name, version, digest; `resource`: identity, pinned access,
+  digest). A `Resource` *is* one entry of a `Discovery`. `extracted` stays an optional, user-projected view next
+  to it.
+* The `Deployer` references a `Discovery` and applies every entry as one ApplySet. An entry that drops out of the
+  selection is pruned. An entry the `Deployer` cannot apply is an error, not skipped.
+* Bootstrap is the same two generic objects for every product, as Flux bootstraps with a source plus a
+  `Kustomization`; the `ocm` CLI can write the pair:
+
+  ```text
+  Discovery (inline source, resourceSelector: deploy artifacts) ──► Deployer (discoveryRef)
+  ```
+
+* KRO `forEach` over `status.resources` stays available when every entry needs its own templated object, e.g. a
+  `HelmRelease` per chart.
+* **Pros**: bootstrap is no special case. One consumption primitive and one output contract for the `Deployer`,
+  KRO and humans. Removal is handled by ApplySet pruning. The threat model is unchanged: the `Deployer` trusts the
+  `Discovery` status as it trusts the `Resource` status today.
+* **Cons**: breaking `Deployer` API change, softened by keeping `resourceRef` during migration. One failing entry
+  fails the whole apply.
+
 ## Decision Outcome
 
-Chosen options: **T1** (Discovery is the consumption primitive and verifies what it outputs) and **E2** (inline
-source rendered into child objects).
+Chosen options: **T1** (Discovery is the consumption primitive and verifies what it outputs), **E2** (inline
+source rendered into child objects) and **D3** (Deployer applies a Discovery).
 
 ### Justification
 
@@ -155,15 +211,19 @@ Both follow one design rule for the controller:
 * **E2**: `Repository` and `Component` are lower layers. Generating them gives the one-object experience without
   a second semver resolver or trust root, and keeps `componentRef` for sharing, as Flux keeps `chartRef`. E3
   reimplements the version layer; E4 depends on an external orchestrator.
-* **Together**: the `Component` verifies the root signature, and `Discovery` anchors on that digest. This holds
-  whether the `Component` is referenced or generated.
+* **D3**: the `Deployer` is the layer above consumption and consumes it through one contract. Bootstrap, nested
+  components and "apply every deploy artifact" are one path. D2 makes the `Deployer` generate the whole stack and
+  keeps bootstrap special; D1 keeps the object count.
+* **Together**: the `Component` verifies the root signature, `Discovery` anchors on that digest, and the
+  `Deployer` applies only what `Discovery` verified. This holds whether the `Component` is referenced or generated.
 
 ### Consequences / Trade-offs
 
-* **Two consumption primitives.** With T1, a `Discovery` with an identity selector covers what a `Resource` does.
-  Follow-up decision: keep `Resource` as a thin special case over the shared implementation, or deprecate it in
-  favour of `Discovery`. Deprecation needs a way for `Deployer` and other `Resource` consumers to reference a
-  single `Discovery` result.
+* **Resource is deprecated.** `Discovery` with an identity selector replaces it, and the shared entry shape keeps
+  migration mechanical. `Deployer.spec.resourceRef` is kept until `Resource` is removed. Flux and Argo CD
+  integrations that read `Resource` status read a `status.resources[]` entry instead.
+* **Output contract.** `status.resources[]` is the API other tools build on and needs the same stability as a
+  CRD field. Whether the raw `components` output and `extract` are still needed next to it is a follow-up.
 * **Selector is a security and cost boundary.** Verification covers exactly what the selectors keep, because what
   the extraction uses cannot be determined. Without a `resourceSelector`, every resource of every surviving
   component is verified.

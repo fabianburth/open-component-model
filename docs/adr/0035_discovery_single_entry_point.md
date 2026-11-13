@@ -60,12 +60,22 @@ that first RGD into a cluster takes four hand-written objects (`Repository`, `Co
 from a component graph, verify them, publish them. A `Resource` is the case of one resource selected by identity.
 
 * **Root**: anchored to the digest of the ready `Component`, which verified it by signature.
-* **Descriptors**: those on a path from the root to a surviving component are checked against their parent
-  reference digests. All other descriptors are only traversed.
+* **Descriptors**: every edge of the traversed graph is checked: each descriptor against the digest each of its
+  incoming references records. A descriptor counts as anchored only through an unbroken chain of digests from the
+  root; a digest recorded by an unanchored parent proves nothing. Checking only the paths to surviving components
+  is a follow-up for cost.
 * **Resources**: only those that survive the selectors are verified, and their accesses are pinned to the
   verified digest.
 * **Output**: extraction and the raw descriptor output only see verified, pinned data.
-* **API**: `spec.verificationPolicy` (`Always` default, `Never`), as on `Resource`. `Resource` and `Discovery`
+* **API**: `spec.verificationPolicy` (`Always` default, `Never`), as on `Resource`.
+  * `Always`: the digest chain must be complete. The root digest is present on the `Component` and every reference
+    of the traversed graph carries a complete digest (value, hash and normalisation algorithm), otherwise
+    `Discovery` is not `Ready` (retried, not terminal; the message lists the gaps). Surviving resources are verified
+    and pinned.
+  * `Never`: resources are published as declared. Missing digests are only reported as a warning, but every
+    descriptor digest that is present is still checked, and a mismatch fails.
+
+  `Resource` and `Discovery`
   share one verified-walk implementation; a reference path is a walk with a single branch.
 * **Pros**: one CR with the guarantees of `Resource`. Verification only reruns when the root digest changes, and
   pinned output makes skipping it safe.
@@ -171,16 +181,27 @@ The three questions get one primitive each:
 | **What** is consumed from it? | `Discovery` |
 | **How** does it get into the cluster? | `Deployer` |
 
-* `Discovery` always publishes a controller-owned `status.resources[]`. Each entry has exactly the shape of
-  today's `Resource` status (`component`: repository, name, version, digest; `resource`: identity, pinned access,
-  digest). A `Resource` *is* one entry of a `Discovery`. `extracted` stays an optional, user-projected view next
+* `Discovery` always publishes a controller-owned `status.resources[]`. Each entry has the shape of today's
+  `Resource` status (`component`: repository, name, version, digest; `resource`: identity, pinned access, digest)
+  plus a `referencePath`: the references from the root to the entry's component version, the last of which recorded
+  `component.digest`, empty for the root. `component.repositorySpec` is the root's repository, from which the
+  `Discovery` resolves the whole graph, routing the root to it ahead of configured resolvers. A `Resource` *is* one
+  entry of a `Discovery`. `extracted` stays an optional, user-projected view next
   to it.
-* The `Deployer` references a `Discovery` and applies every entry as one ApplySet. An entry that drops out of the
-  selection is pruned. An entry the `Deployer` cannot apply is an error, not skipped: a deploy artifact such as an
+* The `Deployer` references a `Discovery` and applies every entry as one ApplySet once the `Discovery` is `Ready`
+  and has observed its current generation. An entry that drops out of the selection is pruned, so an empty
+  `status.resources` prunes everything the `Deployer` applied. Two entries rendering the same object fail the
+  apply. An entry the `Deployer` cannot apply is an error, not skipped: a deploy artifact such as an
   RGD is often an untyped `blob`, so "deployable" could only be guessed from the content. Images and charts are
   selected by a separate `Discovery` inside the deployed composition, not by the bootstrap `Discovery`.
+* The `Deployer` does not trust the entries as a location or an anchor, exactly as on the `resourceRef` path: it
+  follows the `Discovery` to its root `Component`, re-verifies the root signature with the verifications of its
+  effective configuration (inherited from the `Discovery`), and resolves each entry's component version from that
+  root through `referencePath`, each step anchored by its reference digest. `component.repositorySpec` and
+  `component.digest` stay informational; the resolved component version must match them, or the entry fails.
 * Bootstrap is the same two generic objects for every product, as Flux bootstraps with a source plus a
-  `Kustomization`; the `ocm` CLI can write the pair:
+  `Kustomization`; the `ocm` CLI can write the pair. A `NamespacedDeployer` additionally needs its
+  `ServiceAccount` and RBAC, and a private or signed source a `Secret` with its `.ocmconfig`:
 
   ```text
   Discovery (inline source, resourceSelector: deploy artifacts) ──► Deployer (discoveryRef)
@@ -189,8 +210,8 @@ The three questions get one primitive each:
 * KRO `forEach` over `status.resources` stays available when every entry needs its own templated object, e.g. a
   `HelmRelease` per chart.
 * **Pros**: bootstrap is no special case. One consumption primitive and one output contract for the `Deployer`,
-  KRO and humans. Removal is handled by ApplySet pruning. The threat model is unchanged: the `Deployer` trusts the
-  `Discovery` status as it trusts the `Resource` status today.
+  KRO and humans. Removal is handled by ApplySet pruning. The threat model is unchanged: like for a `Resource`, the
+  `Deployer` takes only the selection from the status and re-establishes the chain from the signed root itself.
 * **Cons**: breaking `Deployer` API change, softened by keeping `resourceRef` during migration. One failing entry
   fails the whole apply.
 
@@ -217,7 +238,8 @@ Both follow one design rule for the controller:
   components and "apply every deploy artifact" are one path. D2 makes the `Deployer` generate the whole stack and
   keeps bootstrap special; D1 keeps the object count.
 * **Together**: the `Component` verifies the root signature, `Discovery` anchors on that digest, and the
-  `Deployer` applies only what `Discovery` verified. This holds whether the `Component` is referenced or generated.
+  `Deployer` applies only what `Discovery` selected, re-resolved from the signed root along the same digest chain.
+  This holds whether the `Component` is referenced or generated.
 
 ### Consequences / Trade-offs
 
@@ -233,9 +255,13 @@ Both follow one design rule for the controller:
   broad. Download-only access types dominate; caching verified (access, digest) pairs is the main mitigation.
 * **Behavioural change**: existing `Discovery` objects over unsigned graphs, references without a digest, or
   unverifiable access types fail under `Always`. `Never` is the opt-out.
-* **Generated children**: they need deterministic names, owner references and a deletion policy. Edits to
-  generated objects are overwritten.
+* **Generated children**: they get deterministic names (`<name>-repository`, `<name>-component`), owner
+  references and are deleted when the `Discovery` switches to a `componentRef`, unless it references the generated
+  `Component`. Edits to generated objects are overwritten. An existing object with a generated name that the
+  `Discovery` does not control is never adopted; the `Discovery` reports a conflict instead.
 * **Trust assumption**: anchoring on `Component` status relies on that status being writable only by the
-  controller.
+  controller. `Discovery` status is not trusted for where or what a component version is: whoever can write it can
+  only change the selection, within the graph of the signed root.
 * Supersedes the "per-descriptor digest verification" follow-up of [ADR 0027](0027_ocm_k8s_toolkit_discover.md).
-* Follow-up: a `Discovery` workload in the controller performance benchmark before making `Always` the default.
+* `Always` is the default. Follow-up: a `Discovery` workload in the controller performance benchmark, to measure
+  its cost.

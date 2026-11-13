@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -115,6 +116,50 @@ var _ = Describe("Deployer with a discoveryRef", func() {
 		deployer := createDiscoveryNamespacedDeployer(ctx, ns, discovery.GetName())
 		test.WaitForNotReadyObjectWithMessage(ctx, k8sClient, deployer, v1alpha1.GetComponentVersionFailedReason, "verifying digest")
 		Expect(errors.IsNotFound(k8sClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: "dd-tampered"}, &corev1.ConfigMap{}))).To(BeTrue())
+	})
+
+	It("resolves the root component from the Discovery's repository ahead of configured resolvers", func(ctx SpecContext) {
+		ns := namespace.GetName()
+		createServiceAccount(ctx, ns, true)
+		entries := discoveryEntries(ctx, ns,
+			manifestBlob("cm-routed", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: dd-routed\n"),
+		)
+
+		By("configuring a path matcher that sends the root component to a repository without it, as the Discovery may")
+		elsewhere := discoveryEntries(ctx, ns+"-elsewhere", manifestBlob("unrelated", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: dd-unrelated\n"))
+		ocmConfig, err := json.Marshal(map[string]any{
+			"type": "generic.config.ocm.software/v1",
+			"configurations": []any{map[string]any{
+				"type": "resolvers.config.ocm.software/v1alpha1",
+				"resolvers": []any{map[string]any{
+					"repository":           json.RawMessage(elsewhere[0].Component.RepositorySpec.Raw),
+					"componentNamePattern": entries[0].Component.Component,
+				}},
+			}},
+		})
+		Expect(err).NotTo(HaveOccurred())
+		cm := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{Name: "resolvers", Namespace: ns},
+			Data:       map[string]string{".ocmconfig": string(ocmConfig)},
+		}
+		Expect(k8sClient.Create(ctx, cm)).To(Succeed())
+
+		discovery := createReadyDiscovery(ctx, ns, entries, func(d *v1alpha1.Discovery) {
+			d.Status.EffectiveOCMConfig = []v1alpha1.OCMConfiguration{{
+				NamespacedObjectKindReference: v1alpha1.NamespacedObjectKindReference{
+					APIVersion: corev1.SchemeGroupVersion.String(),
+					Kind:       "ConfigMap",
+					Name:       cm.GetName(),
+					Namespace:  ns,
+				},
+				Policy: v1alpha1.ConfigurationPolicyPropagate,
+			}}
+		})
+
+		deployer := createDiscoveryNamespacedDeployer(ctx, ns, discovery.GetName())
+		test.WaitForReadyObject(ctx, k8sClient, deployer, map[string]any{})
+		Expect(deployer.Status.EffectiveOCMConfig).To(ContainElement(HaveField("Name", cm.GetName())))
+		Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: "dd-routed"}, &corev1.ConfigMap{})).To(Succeed())
 	})
 
 	It("waits for the Discovery to become ready", func(ctx SpecContext) {
@@ -252,29 +297,37 @@ func discoveryEntries(ctx SpecContext, namespace string, blobs ...fixtureBlob) [
 	return entries
 }
 
-// createReadyDiscovery creates a Discovery and publishes the entries in its status, as the Discovery controller
-// would once the graph is verified. The Discovery controller does not run in this suite.
-func createReadyDiscovery(ctx SpecContext, namespace string, entries []v1alpha1.DiscoveredResource) *v1alpha1.Discovery {
+// createReadyDiscovery creates a Discovery of the entries' (root) component and publishes the entries in its status,
+// as the Discovery controller would once the graph is verified. The Discovery controller does not run in this suite.
+func createReadyDiscovery(ctx SpecContext, namespace string, entries []v1alpha1.DiscoveredResource, mutate ...func(*v1alpha1.Discovery)) *v1alpha1.Discovery {
 	GinkgoHelper()
 
 	discovery := &v1alpha1.Discovery{
 		ObjectMeta: metav1.ObjectMeta{Name: "discovery", Namespace: namespace},
-		Spec:       v1alpha1.DiscoverySpec{ComponentRef: corev1.LocalObjectReference{Name: "unused"}},
+		Spec: v1alpha1.DiscoverySpec{Source: &v1alpha1.DiscoverySource{
+			RepositorySpec: entries[0].Component.RepositorySpec,
+			Component:      entries[0].Component.Component,
+			Semver:         entries[0].Component.Version,
+			Interval:       metav1.Duration{Duration: time.Minute},
+		}},
 	}
 	Expect(k8sClient.Create(ctx, discovery)).To(Succeed())
 	DeferCleanup(func(ctx SpecContext) {
 		test.DeleteObject(ctx, k8sClient, discovery)
 	})
-	setDiscoveryResources(ctx, discovery, entries)
+	setDiscoveryResources(ctx, discovery, entries, mutate...)
 
 	return discovery
 }
 
-func setDiscoveryResources(ctx SpecContext, discovery *v1alpha1.Discovery, entries []v1alpha1.DiscoveredResource) {
+func setDiscoveryResources(ctx SpecContext, discovery *v1alpha1.Discovery, entries []v1alpha1.DiscoveredResource, mutate ...func(*v1alpha1.Discovery)) {
 	GinkgoHelper()
 
 	Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(discovery), discovery)).To(Succeed())
 	discovery.Status.Resources = append([]v1alpha1.DiscoveredResource{}, entries...)
+	for _, m := range mutate {
+		m(discovery)
+	}
 	status.MarkReady(recorder, discovery, "discovered")
 	discovery.SetObservedGeneration(discovery.GetGeneration())
 	Expect(k8sClient.Status().Update(ctx, discovery)).To(Succeed())

@@ -24,6 +24,8 @@ type entry struct {
 	resource  *deliveryv1alpha1.ResourceInfo
 	// identity selects the resource in the component descriptor.
 	identity ocmruntime.Identity
+	// componentPatterns route matching components to the entry's repository spec ahead of configured resolvers.
+	componentPatterns []string
 	// componentDescriptor fetches the entry's component descriptor and checks its integrity.
 	componentDescriptor func(ctx context.Context, cfg *configuration.Configuration, pm *manager.PluginManager) (*descriptor.Descriptor, error)
 	// describe names the entry in errors. Empty for the single entry of a Resource.

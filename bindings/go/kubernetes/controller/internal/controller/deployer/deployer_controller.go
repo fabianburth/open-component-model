@@ -531,9 +531,10 @@ func (r *Reconciler) createRepositoryResolver(
 	}
 
 	repoResolver, err := r.Resolver.RepositoryResolver(ctx, &resolution.Options{
-		RepositorySpec: repoSpec,
-		Configuration:  cfg,
-		PluginManager:  pm,
+		RepositorySpec:    repoSpec,
+		Configuration:     cfg,
+		PluginManager:     pm,
+		ComponentPatterns: e.componentPatterns,
 	})
 	if err != nil {
 		err = e.wrap(err)

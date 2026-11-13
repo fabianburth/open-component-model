@@ -35,9 +35,16 @@ func (r *Reconciler) reconcileDiscoveryDeployment(ctx context.Context, deployer 
 		return ctrl.Result{}, err
 	}
 
+	root, err := r.rootComponent(ctx, discovery)
+	if err != nil {
+		status.MarkNotReady(r.EventRecorder, deployer, deliveryv1alpha1.ResourceIsNotAvailable, err.Error())
+
+		return ctrl.Result{}, err
+	}
+
 	deployables := make([]deployable, 0, len(discovery.Status.Resources))
 	for i := range discovery.Status.Resources {
-		d, err := r.loadEntry(ctx, deployer, r.discoveryEntry(discovery, &discovery.Status.Resources[i]), cfg, pm)
+		d, err := r.loadEntry(ctx, deployer, r.discoveryEntry(discovery, &discovery.Status.Resources[i], root), cfg, pm)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
@@ -99,10 +106,26 @@ func discoveryKey(deployer deliveryv1alpha1.DeployerObject) client.ObjectKey {
 	return client.ObjectKey{Namespace: namespace, Name: ref.Name}
 }
 
+// rootComponent returns the name of the Discovery's root component.
+func (r *Reconciler) rootComponent(ctx context.Context, discovery *deliveryv1alpha1.Discovery) (string, error) {
+	if discovery.Spec.Source != nil {
+		return discovery.Spec.Source.Component, nil
+	}
+
+	component := &deliveryv1alpha1.Component{}
+	key := client.ObjectKey{Namespace: discovery.GetNamespace(), Name: discovery.Spec.ComponentRef.Name}
+	if err := r.Get(ctx, key, component); err != nil {
+		return "", fmt.Errorf("failed to get the root component of discovery %s: %w", discovery.GetName(), err)
+	}
+
+	return component.Spec.Component, nil
+}
+
 // discoveryEntry turns a resource published by the Discovery into an entry. The component descriptor is fetched
 // again and anchored by the digest the Discovery recorded for the component version, so the descriptor the resource
-// is downloaded with is the one the Discovery verified.
-func (r *Reconciler) discoveryEntry(discovery *deliveryv1alpha1.Discovery, res *deliveryv1alpha1.DiscoveredResource) *entry {
+// is downloaded with is the one the Discovery verified. The entries carry the root repository spec, and like the
+// Discovery the root component is routed to it ahead of configured resolvers, so both resolve the same repositories.
+func (r *Reconciler) discoveryEntry(discovery *deliveryv1alpha1.Discovery, res *deliveryv1alpha1.DiscoveredResource, root string) *entry {
 	identity := ocmruntime.Identity{descriptor.IdentityAttributeName: res.Resource.Name}
 	if res.Resource.Version != "" {
 		identity[descriptor.IdentityAttributeVersion] = res.Resource.Version
@@ -112,10 +135,11 @@ func (r *Reconciler) discoveryEntry(discovery *deliveryv1alpha1.Discovery, res *
 	}
 
 	return &entry{
-		owner:     discovery,
-		component: &res.Component,
-		resource:  &res.Resource,
-		identity:  identity,
+		owner:             discovery,
+		component:         &res.Component,
+		resource:          &res.Resource,
+		identity:          identity,
+		componentPatterns: []string{root},
 		describe: fmt.Sprintf("resource %s of component %s:%s",
 			identity.String(), res.Component.Component, res.Component.Version),
 		componentDescriptor: func(ctx context.Context, cfg *configuration.Configuration, pm *manager.PluginManager) (*descriptor.Descriptor, error) {
@@ -125,9 +149,10 @@ func (r *Reconciler) discoveryEntry(discovery *deliveryv1alpha1.Discovery, res *
 			}
 
 			desc, err := r.Resolver.GetComponentVersion(ctx, &resolution.Options{
-				RepositorySpec: repoSpec,
-				Configuration:  cfg,
-				PluginManager:  pm,
+				RepositorySpec:    repoSpec,
+				Configuration:     cfg,
+				PluginManager:     pm,
+				ComponentPatterns: []string{root},
 			}, resolution.Verification{Digest: res.Component.Digest}, res.Component.Component, res.Component.Version)
 			if err != nil {
 				return nil, err

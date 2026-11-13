@@ -117,7 +117,7 @@ func discoveredResources(
 						RepositorySpec: repositorySpec.DeepCopy(),
 						Component:      key.Name,
 						Version:        key.Version,
-						Digest:         anchors[key].DeepCopy(),
+						Digest:         anchors[key].Digest.DeepCopy(),
 					},
 					Resource: *info,
 				},

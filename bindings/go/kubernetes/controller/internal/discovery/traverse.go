@@ -58,18 +58,19 @@ func (rd *resolverAndDiscoverer) Discover(_ context.Context, parent *descriptor.
 }
 
 // DigestsComplete reports whether every reference in the graph has a
-// digest. A component descriptor digest is computed over the normalised
-// descriptor including its references' digests, so the root digest covers the
-// whole transitive graph only if everything has a digest. A single reference
-// without a digest signals that we can't trust the whole chain, so we have to
-// always fully fetch everything.
+// complete digest, by the same definition Anchor uses. A component descriptor
+// digest is computed over the normalised descriptor including its references'
+// digests, so the root digest covers the whole transitive graph only if
+// everything has a digest. A single reference without a complete digest
+// signals that we can't trust the whole chain, so we have to always fully
+// fetch everything.
 func (g Graph) DigestsComplete() bool {
 	for _, d := range g.Descriptors {
 		if d == nil {
 			return false
 		}
 		for i := range d.Component.References {
-			if d.Component.References[i].Digest.Value == "" {
+			if referenceDigest(&d.Component.References[i]) == nil {
 				return false
 			}
 		}

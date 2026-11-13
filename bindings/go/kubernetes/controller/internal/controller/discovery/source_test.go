@@ -9,6 +9,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -26,6 +27,7 @@ import (
 	desc "ocm.software/open-component-model/bindings/go/descriptor/runtime"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/api/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/ocm"
+	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/resolution"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/setup"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/status"
 	ocirepository "ocm.software/open-component-model/bindings/go/oci/repository"
@@ -82,6 +84,7 @@ var _ = Describe("Discovery with an inline source", Ordered, ContinueOnFailure, 
 				},
 				RateLimit: ocm.RateLimit{QPS: 0.001, Burst: 1},
 			},
+			Resolver: resolution.NewResolver(new(logr.Discard())),
 		}).SetupWithManager(mgrCtx, mgr, 1)).To(Succeed())
 
 		done := make(chan struct{})

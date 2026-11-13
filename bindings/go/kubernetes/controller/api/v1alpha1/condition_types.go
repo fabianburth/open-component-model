@@ -94,4 +94,12 @@ const (
 
 	// PayloadTooLargeReason is used when the Discovery status payload exceeds the API server size limit.
 	PayloadTooLargeReason = "PayloadTooLarge"
+
+	// GenerateSourceFailedReason is used when the Repository or Component generated from the inline source of a
+	// Discovery cannot be applied or deleted.
+	GenerateSourceFailedReason = "GenerateSourceFailed"
+
+	// GeneratedObjectConflictReason is used when an object with the name of a Repository or Component generated
+	// from the inline source of a Discovery exists but is not controlled by that Discovery.
+	GeneratedObjectConflictReason = "GeneratedObjectConflict"
 )

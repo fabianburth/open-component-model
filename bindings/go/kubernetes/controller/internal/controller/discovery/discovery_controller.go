@@ -52,21 +52,21 @@ type Reconciler struct {
 
 var _ ocm.Reconciler = (*Reconciler)(nil)
 
-// componentRefIndex keys Discoveries by the Component they discover: the
-// referenced one, or the one generated from their inline source.
-const componentRefIndex = "spec.componentRef.name"
+// rootComponentIndex keys Discoveries by the name of their root Component:
+// the referenced one, or the one generated from their inline source.
+const rootComponentIndex = "rootComponentName"
 
 // SetupWithManager sets up the Discovery controller with the Manager.
 func (r *Reconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, concurrency int) error {
 	// Build index for discoveries that reference a component to make sure that we
 	// get notified when a component changes.
-	if err := mgr.GetFieldIndexer().IndexField(ctx, &v1alpha1.Discovery{}, componentRefIndex, func(obj client.Object) []string {
+	if err := mgr.GetFieldIndexer().IndexField(ctx, &v1alpha1.Discovery{}, rootComponentIndex, func(obj client.Object) []string {
 		discovery, ok := obj.(*v1alpha1.Discovery)
 		if !ok {
 			return nil
 		}
 
-		return []string{rootComponentName(discovery)}
+		return []string{discovery.RootComponentName()}
 	}); err != nil {
 		return fmt.Errorf("failed setting index fields: %w", err)
 	}
@@ -99,7 +99,7 @@ func (r *Reconciler) mapComponentToDiscoveries(ctx context.Context, obj client.O
 	referencing := &v1alpha1.DiscoveryList{}
 	if err := r.List(ctx, referencing,
 		client.InNamespace(component.GetNamespace()),
-		client.MatchingFields{componentRefIndex: component.GetName()}); err != nil {
+		client.MatchingFields{rootComponentIndex: component.GetName()}); err != nil {
 		log.FromContext(ctx).Error(err, "failed to list discoveries referencing component as root",
 			"component", client.ObjectKeyFromObject(component))
 
@@ -168,14 +168,18 @@ func (r *Reconciler) reconcile(ctx context.Context, discovery *v1alpha1.Discover
 	logger := log.FromContext(ctx)
 
 	if err := r.reconcileSource(ctx, discovery); err != nil {
-		status.MarkNotReady(r.EventRecorder, discovery, generateSourceFailedReason, err.Error())
+		reason := v1alpha1.GenerateSourceFailedReason
+		if errors.Is(err, errGeneratedObjectConflict) {
+			reason = v1alpha1.GeneratedObjectConflictReason
+		}
+		status.MarkNotReady(r.EventRecorder, discovery, reason, err.Error())
 
 		return ctrl.Result{}, err
 	}
 
 	component, err := util.GetReadyObject[v1alpha1.Component, *v1alpha1.Component](ctx, r.Client, client.ObjectKey{
 		Namespace: discovery.GetNamespace(),
-		Name:      rootComponentName(discovery),
+		Name:      discovery.RootComponentName(),
 	})
 	if err != nil {
 		status.MarkNotReady(r.EventRecorder, discovery, v1alpha1.ResourceIsNotAvailable, err.Error())

@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
@@ -15,38 +16,13 @@ import (
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/api/v1alpha1"
 )
 
-const (
-	// sourceFieldManager owns the fields of the Repository and Component
-	// generated from a Discovery's inline source.
-	sourceFieldManager = "discovery-controller"
+// sourceFieldManager owns the fields of the Repository and Component
+// generated from a Discovery's inline source.
+const sourceFieldManager = "discovery-controller"
 
-	// generateSourceFailedReason marks a Discovery whose generated Repository
-	// or Component could not be applied or deleted.
-	generateSourceFailedReason = "GenerateSourceFailed"
-)
-
-// generatedRepositoryName is the name of the Repository generated from the
-// inline source of the named Discovery.
-func generatedRepositoryName(discovery string) string {
-	return discovery + "-repository"
-}
-
-// generatedComponentName is the name of the Component generated from the
-// inline source of the named Discovery.
-func generatedComponentName(discovery string) string {
-	return discovery + "-component"
-}
-
-// rootComponentName is the name of the Component whose graph the Discovery
-// discovers: the generated one for an inline source, the referenced one
-// otherwise.
-func rootComponentName(discovery *v1alpha1.Discovery) string {
-	if discovery.Spec.Source != nil {
-		return generatedComponentName(discovery.GetName())
-	}
-
-	return discovery.Spec.ComponentRef.Name
-}
+// errGeneratedObjectConflict reports an object with a generated name that the
+// Discovery does not control.
+var errGeneratedObjectConflict = errors.New("object exists and is not controlled by the discovery")
 
 // reconcileSource converges the objects generated from the inline source: it
 // server-side applies the Repository and Component while a source is set,
@@ -59,7 +35,7 @@ func (r *Reconciler) reconcileSource(ctx context.Context, discovery *v1alpha1.Di
 	source := discovery.Spec.Source
 	repository := &v1alpha1.Repository{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      generatedRepositoryName(discovery.GetName()),
+			Name:      v1alpha1.GeneratedRepositoryName(discovery.GetName()),
 			Namespace: discovery.GetNamespace(),
 		},
 		Spec: v1alpha1.RepositorySpec{
@@ -70,7 +46,7 @@ func (r *Reconciler) reconcileSource(ctx context.Context, discovery *v1alpha1.Di
 	}
 	component := &v1alpha1.Component{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      generatedComponentName(discovery.GetName()),
+			Name:      v1alpha1.GeneratedComponentName(discovery.GetName()),
 			Namespace: discovery.GetNamespace(),
 		},
 		Spec: v1alpha1.ComponentSpec{
@@ -84,10 +60,40 @@ func (r *Reconciler) reconcileSource(ctx context.Context, discovery *v1alpha1.Di
 		},
 	}
 
-	for _, obj := range []client.Object{repository, component} {
+	// Nothing is written unless the Discovery controls every object it would
+	// write: applying with forced ownership would otherwise adopt and rewrite
+	// a foreign object that happens to have a generated name.
+	generated := []client.Object{repository, component}
+	for _, obj := range generated {
+		if err := r.checkControlled(ctx, discovery, obj); err != nil {
+			return err
+		}
+	}
+	for _, obj := range generated {
 		if err := r.applyGenerated(ctx, discovery, obj); err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+// checkControlled fails with errGeneratedObjectConflict if an object with the
+// name of desired exists and is not controlled by the Discovery.
+func (r *Reconciler) checkControlled(ctx context.Context, discovery *v1alpha1.Discovery, desired client.Object) error {
+	existing, ok := desired.DeepCopyObject().(client.Object)
+	if !ok {
+		return fmt.Errorf("unexpected type %T after deep copy", desired)
+	}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(desired), existing); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+
+		return fmt.Errorf("failed to get %T %s: %w", desired, desired.GetName(), err)
+	}
+	if !metav1.IsControlledBy(existing, discovery) {
+		return fmt.Errorf("%w: %T %s", errGeneratedObjectConflict, desired, desired.GetName())
 	}
 
 	return nil
@@ -127,17 +133,19 @@ func (r *Reconciler) applyGenerated(ctx context.Context, discovery *v1alpha1.Dis
 }
 
 // deleteGenerated deletes the objects generated from a former inline source.
-// Only objects the Discovery controls are deleted, and never the Component
-// it now references.
+// Only objects the Discovery controls are deleted. A Discovery that now
+// references the generated Component keeps both: the Component still
+// references the generated Repository.
 func (r *Reconciler) deleteGenerated(ctx context.Context, discovery *v1alpha1.Discovery) error {
+	if discovery.Spec.ComponentRef.Name == v1alpha1.GeneratedComponentName(discovery.GetName()) {
+		return nil
+	}
+
 	generated := []client.Object{
-		&v1alpha1.Component{ObjectMeta: metav1.ObjectMeta{Name: generatedComponentName(discovery.GetName())}},
-		&v1alpha1.Repository{ObjectMeta: metav1.ObjectMeta{Name: generatedRepositoryName(discovery.GetName())}},
+		&v1alpha1.Component{ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.GeneratedComponentName(discovery.GetName())}},
+		&v1alpha1.Repository{ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.GeneratedRepositoryName(discovery.GetName())}},
 	}
 	for _, obj := range generated {
-		if obj.GetName() == discovery.Spec.ComponentRef.Name {
-			continue
-		}
 
 		key := client.ObjectKey{Namespace: discovery.GetNamespace(), Name: obj.GetName()}
 		if err := r.Get(ctx, key, obj); err != nil {

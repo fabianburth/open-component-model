@@ -419,7 +419,7 @@ func TestMapComponentToDiscoveries(t *testing.T) {
 	fakeClient := fake.NewClientBuilder().
 		WithScheme(newTestScheme(t)).
 		WithObjects(discoveries...).
-		WithIndex(&v1alpha1.Discovery{}, componentRefIndex, func(obj client.Object) []string {
+		WithIndex(&v1alpha1.Discovery{}, rootComponentIndex, func(obj client.Object) []string {
 			return []string{obj.(*v1alpha1.Discovery).Spec.ComponentRef.Name}
 		}).
 		Build()

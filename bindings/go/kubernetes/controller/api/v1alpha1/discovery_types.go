@@ -251,6 +251,28 @@ type Discovery struct {
 	Status DiscoveryStatus `json:"status,omitempty"`
 }
 
+// GeneratedRepositoryName is the name of the Repository generated from the
+// inline source of the named Discovery.
+func GeneratedRepositoryName(discovery string) string {
+	return discovery + "-repository"
+}
+
+// GeneratedComponentName is the name of the Component generated from the
+// inline source of the named Discovery.
+func GeneratedComponentName(discovery string) string {
+	return discovery + "-component"
+}
+
+// RootComponentName is the name of the Component whose graph the Discovery
+// discovers: the one generated from spec.source, or spec.componentRef.
+func (in *Discovery) RootComponentName() string {
+	if in.Spec.Source != nil {
+		return GeneratedComponentName(in.GetName())
+	}
+
+	return in.Spec.ComponentRef.Name
+}
+
 // GetConditions returns the conditions of the Discovery.
 func (in *Discovery) GetConditions() []metav1.Condition {
 	return in.Status.Conditions

@@ -258,6 +258,83 @@ var _ = Describe("Discovery with an inline source", Ordered, ContinueOnFailure, 
 			}).WithContext(ctx).Should(Satisfy(apierrors.IsNotFound), "generated %T must be deleted", obj)
 		}
 	}, SpecTimeout(sourceSpecTimeout))
+
+	It("keeps the generated objects when switching to componentRef on the generated Component", func(ctx SpecContext) {
+		discovery := newSourceDiscovery(ctx, "adopt", nil)
+		repository, component := getGenerated(ctx, discovery)
+
+		Eventually(func(g Gomega) {
+			fresh := &v1alpha1.Discovery{}
+			g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(discovery), fresh)).To(Succeed())
+			fresh.Spec.Source = nil
+			fresh.Spec.ComponentRef = corev1.LocalObjectReference{Name: component.GetName()}
+			g.Expect(k8sClient.Update(ctx, fresh)).To(Succeed())
+		}).WithContext(ctx).Should(Succeed())
+
+		// The update enqueues the Discovery at once; a deletion would show
+		// within this window.
+		Consistently(func(g Gomega) {
+			for _, obj := range []client.Object{component, repository} {
+				g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(obj), obj)).To(Succeed())
+				g.Expect(obj.GetDeletionTimestamp().IsZero()).To(BeTrue(), "%T %s must be kept", obj, obj.GetName())
+			}
+		}).WithContext(ctx).WithTimeout(3 * time.Second).Should(Succeed())
+	}, SpecTimeout(sourceSpecTimeout))
+})
+
+// An inline source must not adopt and overwrite a pre-existing object it does
+// not control that happens to have a generated name.
+var _ = Describe("Discovery with an inline source and a name collision", func() {
+	It("does not take over a foreign Component named <discovery>-component", func(ctx SpecContext) {
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{GenerateName: "source-collision-"}}
+		Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+
+		victim := &v1alpha1.Component{
+			ObjectMeta: metav1.ObjectMeta{Name: "prod-component", Namespace: ns.Name},
+			Spec: v1alpha1.ComponentSpec{
+				RepositoryRef: corev1.LocalObjectReference{Name: "prod-trusted-repo"},
+				Component:     "ocm.software/prod",
+				Semver:        "1.0.0",
+				Interval:      metav1.Duration{Duration: time.Minute},
+			},
+		}
+		Expect(k8sClient.Create(ctx, victim)).To(Succeed())
+
+		discovery := &v1alpha1.Discovery{
+			ObjectMeta: metav1.ObjectMeta{Name: "prod", Namespace: ns.Name},
+			Spec: v1alpha1.DiscoverySpec{
+				Source: &v1alpha1.DiscoverySource{
+					RepositorySpec: &apiextensionsv1.JSON{Raw: []byte(`{"type":"OCIRegistry","baseUrl":"attacker.example"}`)},
+					Component:      "attacker/comp",
+					Semver:         ">=0.0.0",
+					Interval:       metav1.Duration{Duration: time.Minute},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, discovery)).To(Succeed())
+
+		rec := &Reconciler{BaseReconciler: &ocm.BaseReconciler{
+			Client: k8sClient, Scheme: k8sClient.Scheme(), EventRecorder: &record.FakeRecorder{},
+		}}
+		_, err := rec.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(discovery)})
+		Expect(err).To(MatchError(ContainSubstring("not controlled by the discovery")))
+
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(victim), victim)).To(Succeed())
+		Expect(victim.GetOwnerReferences()).To(BeEmpty(), "a foreign Component must not be adopted")
+		Expect(victim.Spec.Component).To(Equal("ocm.software/prod"))
+		Expect(victim.Spec.RepositoryRef.Name).To(Equal("prod-trusted-repo"))
+
+		By("writing nothing, not even the Repository that does not collide")
+		Expect(apierrors.IsNotFound(k8sClient.Get(ctx, client.ObjectKey{Namespace: ns.Name, Name: "prod-repository"},
+			&v1alpha1.Repository{}))).To(BeTrue())
+
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(discovery), discovery)).To(Succeed())
+		ready := status.FindCondition(discovery, v1alpha1.ReadyCondition)
+		Expect(ready).NotTo(BeNil())
+		Expect(ready.Status).To(Equal(metav1.ConditionFalse))
+		Expect(ready.Reason).To(Equal(v1alpha1.GeneratedObjectConflictReason))
+		Expect(ready.Message).To(ContainSubstring("prod-component"))
+	})
 })
 
 // sourceCTF builds a read-only CTF repository holding descs and returns its

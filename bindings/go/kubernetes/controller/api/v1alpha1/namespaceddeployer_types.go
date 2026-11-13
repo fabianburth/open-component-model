@@ -23,11 +23,18 @@ const (
 )
 
 // NamespacedDeployerSpec defines the desired state of NamespacedDeployer.
+// Exactly one of resourceRef and discoveryRef must be set.
+// +kubebuilder:validation:XValidation:rule="has(self.resourceRef) != has(self.discoveryRef)",message="exactly one of resourceRef and discoveryRef must be set"
 type NamespacedDeployerSpec struct {
 	// ResourceRef is the name of an OCM resource in the same namespace containing the ResourceGroupDefinition.
-	// +required
+	// +optional
 	// +kubebuilder:validation:XValidation:rule="self.name != ''",message="resourceRef.name must be set"
-	ResourceRef corev1.LocalObjectReference `json:"resourceRef"`
+	ResourceRef corev1.LocalObjectReference `json:"resourceRef,omitzero"`
+
+	// DiscoveryRef is the name of a Discovery in the same namespace whose deployable resources are applied.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self.name != ''",message="discoveryRef.name must be set"
+	DiscoveryRef *corev1.LocalObjectReference `json:"discoveryRef,omitempty"`
 
 	// ServiceAccountName is the name of the service account in the same namespace that is impersonated
 	// to apply and prune the deployed objects. Its RBAC permissions define what the deployer may deploy.
@@ -94,6 +101,15 @@ func (in *NamespacedDeployer) GetEffectiveOCMConfig() []OCMConfiguration {
 
 func (in *NamespacedDeployer) GetResourceRef() ObjectKey {
 	return ObjectKey{Namespace: in.GetNamespace(), Name: in.Spec.ResourceRef.Name}
+}
+
+// GetDiscoveryRef returns the referenced Discovery in the deployer's namespace, nil if none is set.
+func (in *NamespacedDeployer) GetDiscoveryRef() *ObjectKey {
+	if in.Spec.DiscoveryRef == nil {
+		return nil
+	}
+
+	return &ObjectKey{Namespace: in.GetNamespace(), Name: in.Spec.DiscoveryRef.Name}
 }
 
 func (in *NamespacedDeployer) GetServiceAccountName() string {

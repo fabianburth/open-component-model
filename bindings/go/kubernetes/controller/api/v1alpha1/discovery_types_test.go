@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -56,6 +57,15 @@ func TestDiscoveryStatusPayloadPresence(t *testing.T) {
 		r.NoError(err)
 		r.NotContains(string(data), "components")
 		r.NotContains(string(data), "extracted")
+		r.NotContains(string(data), "resources")
+	})
+
+	t.Run("resources present when computed empty", func(t *testing.T) {
+		data, err := json.Marshal(&DiscoveryStatus{
+			Resources: []DiscoveredResource{},
+		})
+		r.NoError(err)
+		r.Contains(string(data), `"resources":[]`)
 	})
 
 	t.Run("present when computed empty", func(t *testing.T) {
@@ -156,4 +166,21 @@ func TestDiscoveryAccessors(t *testing.T) {
 	r.Empty(discovery.Status.Conditions)
 
 	r.Same(&discovery.ObjectMeta, discovery.GetObjectMeta())
+}
+
+// TestDiscoverySpecRefPresence verifies that the componentRef/source CEL
+// exclusivity rule sees exactly what a Go client set: a zero componentRef is
+// omitted.
+func TestDiscoverySpecRefPresence(t *testing.T) {
+	r := require.New(t)
+
+	data, err := json.Marshal(&DiscoverySpec{Source: &DiscoverySource{Component: "ocm.software/test"}})
+	r.NoError(err)
+	r.NotContains(string(data), "componentRef")
+	r.Contains(string(data), `"source":`)
+
+	data, err = json.Marshal(&DiscoverySpec{ComponentRef: corev1.LocalObjectReference{Name: "test"}})
+	r.NoError(err)
+	r.Contains(string(data), `"componentRef":{"name":"test"}`)
+	r.NotContains(string(data), "source")
 }

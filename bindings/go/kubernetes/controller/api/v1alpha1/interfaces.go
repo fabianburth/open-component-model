@@ -53,8 +53,12 @@ type DeployerObject interface {
 	GetVID() map[string]string
 	SetObservedGeneration(v int64)
 
-	// GetResourceRef returns the referenced Resource. An empty namespace defaults to the deployer's namespace.
+	// GetResourceRef returns the referenced Resource, zero if the object references a Discovery instead.
+	// An empty namespace defaults to the deployer's namespace.
 	GetResourceRef() ObjectKey
+	// GetDiscoveryRef returns the referenced Discovery, nil if the object references a Resource instead.
+	// An empty namespace defaults to the deployer's namespace.
+	GetDiscoveryRef() *ObjectKey
 	// GetServiceAccountName returns the service account named by the object, or empty if it names none.
 	GetServiceAccountName() string
 	// GetDeletionPolicy returns how the deployed objects are removed, or empty for the API server's default.

@@ -35,13 +35,70 @@ type Extract struct {
 	Expression string `json:"expression,omitempty"`
 }
 
+// DiscoverySource is an inline source of the root component version. The
+// controller generates a Repository and a Component from it and discovers the
+// graph of the component version the Component resolves.
+type DiscoverySource struct {
+	// RepositorySpec is the config of an ocm repository containing component
+	// versions. This config has to be a valid ocm repository implementation
+	// specification
+	// https://github.com/open-component-model/ocm-spec/blob/main/doc/04-extensions/03-storage-backends/README.md.
+	// +required
+	RepositorySpec *apiextensionsv1.JSON `json:"repositorySpec"`
+
+	// Component is the name of the ocm component.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	Component string `json:"component"`
+
+	// Semver defines the constraint of the fetched version. '>=v0.1'.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	Semver string `json:"semver"`
+
+	// SemverFilter is a regex pattern to filter the versions within the Semver
+	// range.
+	// +optional
+	SemverFilter string `json:"semverFilter,omitempty"`
+
+	// DowngradePolicy specifies whether the component may be downgraded.
+	// `Deny` (default) means never allow downgrades (thus, never fetch components with a
+	// version lower than the version currently deployed).
+	// `Allow` means always allow downgrades.
+	// +kubebuilder:validation:Enum:=Allow;Deny
+	// +kubebuilder:default:=Deny
+	// +optional
+	DowngradePolicy DowngradePolicy `json:"downgradePolicy,omitempty"`
+
+	// Interval at which the repository is checked for new component versions.
+	// +required
+	Interval metav1.Duration `json:"interval"`
+}
+
 // DiscoverySpec defines the desired state of Discovery.
+// Exactly one of componentRef and source must be specified.
+// +kubebuilder:validation:XValidation:rule="has(self.componentRef) != has(self.source)",message="exactly one of componentRef and source must be specified"
 type DiscoverySpec struct {
 	// ComponentRef is a reference to a Component in the same namespace whose
 	// transitive component graph is discovered.
-	// +required
+	// +optional
 	// +kubebuilder:validation:XValidation:rule="self.name.size() > 0",message="name must not be empty"
-	ComponentRef corev1.LocalObjectReference `json:"componentRef"`
+	ComponentRef corev1.LocalObjectReference `json:"componentRef,omitzero"`
+
+	// Source is an inline source of the root component version. The
+	// controller generates the Repository and the Component from it, passing
+	// spec.ocmConfig through.
+	// +optional
+	Source *DiscoverySource `json:"source,omitempty"`
+
+	// VerificationPolicy controls whether the discovered graph is verified.
+	// Always (default): verify every component version and resource digest of
+	// the discovered graph before publishing status.resources.
+	// Never: skip verification unconditionally.
+	// +kubebuilder:validation:Enum:="Always";"Never"
+	// +kubebuilder:default:="Always"
+	// +optional
+	VerificationPolicy VerificationPolicy `json:"verificationPolicy,omitempty"`
 
 	// ReferenceSelector filters the references of all resolved descriptors.
 	// Only reference targets with at least one matching incoming reference are
@@ -107,6 +164,21 @@ func (in *ExtractedRecord) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// DiscoveredResource is a resource of the discovered graph together with the
+// component version it belongs to.
+type DiscoveredResource struct {
+	// Component is the component version the resource belongs to. Its digest
+	// is the digest of that component version: the root's digest as resolved
+	// by the Component, a child's digest as recorded in its parent's
+	// reference.
+	// +required
+	Component ComponentInfo `json:"component"`
+
+	// Resource is the discovered resource.
+	// +required
+	Resource ResourceInfo `json:"resource"`
+}
+
 // DiscoveryStatus defines the observed state of Discovery.
 // +kubebuilder:validation:XValidation:rule="!(has(self.components) && has(self.extracted))",message="components and extracted cannot be set at the same time"
 type DiscoveryStatus struct {
@@ -133,6 +205,13 @@ type DiscoveryStatus struct {
 	// empty result is an empty list; an uncomputed result is absent.
 	// +optional
 	Extracted []ExtractedRecord `json:"extracted,omitzero"`
+
+	// Resources contains every resource of the discovered graph. It is
+	// published once the graph is verified (or verification is disabled),
+	// independently of spec.extract and of the selectors. A computed but
+	// empty result is an empty list; an uncomputed result is absent.
+	// +optional
+	Resources []DiscoveredResource `json:"resources,omitzero"`
 
 	// ObservedComponentDigest is the digest of the root Component
 	// It is recorded only when every reference in the discovered graph has a

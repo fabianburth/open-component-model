@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -504,10 +505,16 @@ metadata:
 	})
 
 	It("requires a resource name", func(ctx SpecContext) {
-		deployer := &v1alpha1.NamespacedDeployer{
-			ObjectMeta: metav1.ObjectMeta{Name: "nd-no-resource", Namespace: namespace.GetName()},
-			Spec:       v1alpha1.NamespacedDeployerSpec{ServiceAccountName: "any"},
-		}
+		// The Go client omits a zero resourceRef, so send an explicitly empty one.
+		deployer := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": v1alpha1.GroupVersion.String(),
+			"kind":       v1alpha1.KindNamespacedDeployer,
+			"metadata":   map[string]any{"name": "nd-no-resource", "namespace": namespace.GetName()},
+			"spec": map[string]any{
+				"resourceRef":        map[string]any{"name": ""},
+				"serviceAccountName": "any",
+			},
+		}}
 		err := k8sClient.Create(ctx, deployer)
 		Expect(errors.IsInvalid(err)).To(BeTrue())
 		Expect(err.Error()).To(ContainSubstring("resourceRef.name must be set"))

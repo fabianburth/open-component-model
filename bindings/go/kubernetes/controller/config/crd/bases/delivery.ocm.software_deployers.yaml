@@ -64,8 +64,24 @@ spec:
           metadata:
             type: object
           spec:
-            description: DeployerSpec defines the desired state of Deployer.
+            description: |-
+              DeployerSpec defines the desired state of Deployer.
+              Exactly one of resourceRef and discoveryRef must be set.
             properties:
+              discoveryRef:
+                description: DiscoveryRef is the k8s resource name of a Discovery
+                  whose deployable resources are applied.
+                properties:
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: discoveryRef.name must be set
+                  rule: self.name != ''
               ocmConfig:
                 description: |-
                   OCMConfig defines references to secrets, config maps or ocm api
@@ -131,9 +147,10 @@ spec:
                   Suspend tells the controller to suspend the reconciliation of this
                   Resource.
                 type: boolean
-            required:
-            - resourceRef
             type: object
+            x-kubernetes-validations:
+            - message: exactly one of resourceRef and discoveryRef must be set
+              rule: has(self.resourceRef) != has(self.discoveryRef)
           status:
             description: DeployerStatus defines the observed state of Deployer.
             properties:

@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"encoding/json"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -13,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/api/v1alpha1"
 )
 
@@ -95,6 +97,16 @@ func newUnstructured(namespace string, mutate func(spec map[string]any)) *unstru
 	return obj
 }
 
+// validSource returns a complete inline source as unstructured.
+func validSource() map[string]any {
+	return map[string]any{
+		"repositorySpec": map[string]any{"type": "OCIRepository", "baseUrl": "ghcr.io/open-component-model"},
+		"component":      "ocm.software/test",
+		"semver":         ">=1.0.0",
+		"interval":       "10m",
+	}
+}
+
 var _ = Describe("Discovery API", func() {
 	var namespace *corev1.Namespace
 
@@ -151,6 +163,110 @@ var _ = Describe("Discovery API", func() {
 			Expect(typed.Spec.Extract).NotTo(BeNil())
 			Expect(typed.Spec.Extract.ByResources).NotTo(BeNil())
 			Expect(typed.Spec.Extract.ByResources).To(BeEmpty())
+		})
+
+		It("rejects both componentRef and source", func(ctx SpecContext) {
+			obj := newUnstructured(namespace.Name, func(spec map[string]any) {
+				spec["source"] = validSource()
+			})
+			Expect(k8sClient.Create(ctx, obj)).To(MatchError(ContainSubstring(
+				"exactly one of componentRef and source must be specified")))
+		})
+
+		It("rejects neither componentRef nor source", func(ctx SpecContext) {
+			obj := newUnstructured(namespace.Name, func(spec map[string]any) {
+				delete(spec, "componentRef")
+			})
+			Expect(k8sClient.Create(ctx, obj)).To(MatchError(ContainSubstring(
+				"exactly one of componentRef and source must be specified")))
+		})
+
+		It("accepts an inline source and defaults its downgrade policy", func(ctx SpecContext) {
+			obj := newUnstructured(namespace.Name, func(spec map[string]any) {
+				delete(spec, "componentRef")
+				spec["source"] = validSource()
+			})
+			Expect(k8sClient.Create(ctx, obj)).To(Succeed())
+
+			typed := &v1alpha1.Discovery{}
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(obj), typed)).To(Succeed())
+			Expect(typed.Spec.ComponentRef.Name).To(BeEmpty())
+			Expect(typed.Spec.Source).NotTo(BeNil())
+			Expect(typed.Spec.Source.Component).To(Equal("ocm.software/test"))
+			Expect(typed.Spec.Source.Semver).To(Equal(">=1.0.0"))
+			Expect(typed.Spec.Source.Interval.Duration).To(Equal(10 * time.Minute))
+			Expect(typed.Spec.Source.DowngradePolicy).To(Equal(v1alpha1.DowngradePolicyDeny))
+			Expect(typed.Spec.Source.RepositorySpec.Raw).To(MatchJSON(`{"type":"OCIRepository","baseUrl":"ghcr.io/open-component-model"}`))
+		})
+
+		It("accepts an inline source from a typed client", func(ctx SpecContext) {
+			discovery := &v1alpha1.Discovery{
+				ObjectMeta: metav1.ObjectMeta{GenerateName: "discovery-", Namespace: namespace.Name},
+				Spec: v1alpha1.DiscoverySpec{
+					Source: &v1alpha1.DiscoverySource{
+						RepositorySpec: &apiextensionsv1.JSON{Raw: []byte(`{"type":"OCIRepository","baseUrl":"ghcr.io/open-component-model"}`)},
+						Component:      "ocm.software/test",
+						Semver:         ">=1.0.0",
+						Interval:       metav1.Duration{Duration: time.Minute},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, discovery)).To(Succeed())
+		})
+
+		DescribeTable("rejects an inline source missing a required field",
+			func(ctx SpecContext, field string) {
+				obj := newUnstructured(namespace.Name, func(spec map[string]any) {
+					delete(spec, "componentRef")
+					source := validSource()
+					delete(source, field)
+					spec["source"] = source
+				})
+				err := k8sClient.Create(ctx, obj)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring(field))
+			},
+			Entry("repositorySpec", "repositorySpec"),
+			Entry("component", "component"),
+			Entry("semver", "semver"),
+			Entry("interval", "interval"),
+		)
+
+		It("rejects an unknown inline source downgrade policy", func(ctx SpecContext) {
+			obj := newUnstructured(namespace.Name, func(spec map[string]any) {
+				delete(spec, "componentRef")
+				source := validSource()
+				source["downgradePolicy"] = "Sometimes"
+				spec["source"] = source
+			})
+			Expect(k8sClient.Create(ctx, obj)).To(MatchError(ContainSubstring("downgradePolicy")))
+		})
+
+		It("defaults the verification policy to Always", func(ctx SpecContext) {
+			obj := newUnstructured(namespace.Name, func(map[string]any) {})
+			Expect(k8sClient.Create(ctx, obj)).To(Succeed())
+
+			typed := &v1alpha1.Discovery{}
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(obj), typed)).To(Succeed())
+			Expect(typed.Spec.VerificationPolicy).To(Equal(v1alpha1.VerificationPolicyAlways))
+		})
+
+		It("accepts the verification policy Never", func(ctx SpecContext) {
+			obj := newUnstructured(namespace.Name, func(spec map[string]any) {
+				spec["verificationPolicy"] = string(v1alpha1.VerificationPolicyNever)
+			})
+			Expect(k8sClient.Create(ctx, obj)).To(Succeed())
+
+			typed := &v1alpha1.Discovery{}
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(obj), typed)).To(Succeed())
+			Expect(typed.Spec.VerificationPolicy).To(Equal(v1alpha1.VerificationPolicyNever))
+		})
+
+		It("rejects an unknown verification policy", func(ctx SpecContext) {
+			obj := newUnstructured(namespace.Name, func(spec map[string]any) {
+				spec["verificationPolicy"] = "Sometimes"
+			})
+			Expect(k8sClient.Create(ctx, obj)).To(MatchError(ContainSubstring("verificationPolicy")))
 		})
 
 		It("rejects an explicitly empty extraction expression", func(ctx SpecContext) {
@@ -220,6 +336,57 @@ var _ = Describe("Discovery API", func() {
 			expected, err := json.Marshal(values)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(raw).To(MatchJSON(expected))
+		})
+
+		It("preserves resources independently of components and extracted", func(ctx SpecContext) {
+			resources := []v1alpha1.DiscoveredResource{{
+				Component: v1alpha1.ComponentInfo{
+					RepositorySpec: &apiextensionsv1.JSON{Raw: []byte(`{"type":"OCIRepository","baseUrl":"ghcr.io/open-component-model"}`)},
+					Component:      "ocm.software/test",
+					Version:        "1.0.0",
+					Digest: &v2.Digest{
+						HashAlgorithm:          "SHA-256",
+						NormalisationAlgorithm: "jsonNormalisation/v4alpha1",
+						Value:                  "abc",
+					},
+				},
+				Resource: v1alpha1.ResourceInfo{
+					Name:          "image",
+					Type:          "ociImage",
+					Version:       "1.0.0",
+					ExtraIdentity: map[string]string{"architecture": "amd64"},
+					Access:        apiextensionsv1.JSON{Raw: []byte(`{"type":"ociArtifact","imageReference":"ghcr.io/open-component-model/test:1.0.0"}`)},
+					Digest: &v2.Digest{
+						HashAlgorithm:          "SHA-256",
+						NormalisationAlgorithm: "genericBlobDigest/v1",
+						Value:                  "def",
+					},
+				},
+			}}
+
+			for _, payload := range []func(*v1alpha1.DiscoveryStatus){
+				func(status *v1alpha1.DiscoveryStatus) { status.Components = toJSONs(descriptor) },
+				func(status *v1alpha1.DiscoveryStatus) {
+					status.Components = nil
+					status.Extracted = []v1alpha1.ExtractedRecord{{}}
+				},
+			} {
+				fetched := &v1alpha1.Discovery{}
+				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(discovery), fetched)).To(Succeed())
+				payload(&fetched.Status)
+				fetched.Status.Resources = resources
+				Expect(k8sClient.Status().Update(ctx, fetched)).To(Succeed())
+
+				after := &v1alpha1.Discovery{}
+				Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(discovery), after)).To(Succeed())
+				Expect(after.Status.Resources).To(HaveLen(1))
+				Expect(after.Status.Resources[0].Component.Component).To(Equal("ocm.software/test"))
+				Expect(after.Status.Resources[0].Component.Digest).To(Equal(resources[0].Component.Digest))
+				Expect(after.Status.Resources[0].Component.RepositorySpec.Raw).To(MatchJSON(resources[0].Component.RepositorySpec.Raw))
+				Expect(after.Status.Resources[0].Resource.ExtraIdentity).To(Equal(resources[0].Resource.ExtraIdentity))
+				Expect(after.Status.Resources[0].Resource.Access.Raw).To(MatchJSON(resources[0].Resource.Access.Raw))
+				Expect(after.Status.Resources[0].Resource.Digest).To(Equal(resources[0].Resource.Digest))
+			}
 		})
 
 		It("rejects mutually exclusive payload fields", func(ctx SpecContext) {

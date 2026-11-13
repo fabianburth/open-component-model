@@ -10,10 +10,17 @@ import (
 const KindDeployer = "Deployer"
 
 // DeployerSpec defines the desired state of Deployer.
+// Exactly one of resourceRef and discoveryRef must be set.
+// +kubebuilder:validation:XValidation:rule="has(self.resourceRef) != has(self.discoveryRef)",message="exactly one of resourceRef and discoveryRef must be set"
 type DeployerSpec struct {
 	// ResourceRef is the k8s resource name of an OCM resource containing the ResourceGroupDefinition.
-	// +required
-	ResourceRef ObjectKey `json:"resourceRef"`
+	// +optional
+	ResourceRef ObjectKey `json:"resourceRef,omitzero"`
+
+	// DiscoveryRef is the k8s resource name of a Discovery whose deployable resources are applied.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self.name != ''",message="discoveryRef.name must be set"
+	DiscoveryRef *ObjectKey `json:"discoveryRef,omitempty"`
 
 	// OCMConfig defines references to secrets, config maps or ocm api
 	// objects providing configuration data including credentials.
@@ -105,6 +112,11 @@ func (in *Deployer) GetEffectiveOCMConfig() []OCMConfiguration {
 
 func (in *Deployer) GetResourceRef() ObjectKey {
 	return in.Spec.ResourceRef
+}
+
+// GetDiscoveryRef returns the referenced Discovery, nil if none is set.
+func (in *Deployer) GetDiscoveryRef() *ObjectKey {
+	return in.Spec.DiscoveryRef
 }
 
 // GetServiceAccountName returns an empty name as the Deployer applies with the controller's own identity.

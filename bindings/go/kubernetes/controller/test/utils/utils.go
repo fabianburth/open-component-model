@@ -144,8 +144,29 @@ func WaitForResource(ctx context.Context, condition, timeout string, resource ..
 	return err
 }
 
+// PrepareOption adjusts how PrepareOCMComponent transfers a component version.
+type PrepareOption func(*prepareOptions)
+
+type prepareOptions struct {
+	recursive     bool
+	copyResources bool
+}
+
+// WithRecursiveTransfer transfers the referenced component versions as well.
+func WithRecursiveTransfer() PrepareOption {
+	return func(o *prepareOptions) { o.recursive = true }
+}
+
+// WithCopyResources copies the resources into the target registry, so their
+// access points to imageRegistry (localization).
+func WithCopyResources() PrepareOption {
+	return func(o *prepareOptions) { o.copyResources = true }
+}
+
 // PrepareOCMComponent creates an OCM component from a component-constructor file.
 // After creating the OCM component, the component is transferred to imageRegistry.
+// The transfer is recursive for names containing "nested" and copies resources
+// for names containing "localization"; opts enable both regardless of the name.
 //
 // When the example directory ships an .ocmconfig alongside the component-constructor.yaml,
 // PrepareOCMComponent signs the component with every signature configured in that file
@@ -154,7 +175,15 @@ func WaitForResource(ctx context.Context, condition, timeout string, resource ..
 // namespace carrying the same file. The controller reads verification credentials from
 // that Secret via spec.ocmConfig on the Component CR. The Secret is deleted after the
 // test through DeferCleanup.
-func PrepareOCMComponent(ctx context.Context, name, componentConstructorPath, imageRegistry string) error {
+func PrepareOCMComponent(ctx context.Context, name, componentConstructorPath, imageRegistry string, opts ...PrepareOption) error {
+	options := prepareOptions{
+		recursive:     strings.Contains(name, "nested"),
+		copyResources: strings.Contains(name, "localization"),
+	}
+	for _, opt := range opts {
+		opt(&options)
+	}
+
 	ocm := OCMBinary()
 
 	By("creating ocm component for " + name)
@@ -231,11 +260,11 @@ func PrepareOCMComponent(ctx context.Context, name, componentConstructorPath, im
 	}
 	cmd = exec.CommandContext(ctx, ocm, "transfer", "cv", transferRef, imageRegistry, "--config", plainHTTPConfig)
 
-	if strings.Contains(name, "nested") {
+	if options.recursive {
 		cmd.Args = append(cmd.Args, "--recursive")
 	}
 
-	if strings.Contains(name, "localization") {
+	if options.copyResources {
 		uploaderConfigPath := filepath.Join(tmpDir, "oci-uploader.ocmconfig")
 		uploaderConfig := "type: generic.config.ocm.software/v1\nconfigurations:\n- type: oci.uploader.transfer.config.ocm.software/v1alpha1\n"
 		if err := os.WriteFile(uploaderConfigPath, []byte(uploaderConfig), 0o600); err != nil {

@@ -369,13 +369,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 	if resource.Spec.VerificationPolicy != v1alpha1.VerificationPolicyNever {
 		logger.V(1).Info("verifying resource")
 
-		if ocm.IsLocalResource(matchedResource) {
-			// Local resources are checked against the digest their repository stores them
-			// under; only content it cannot check that way is downloaded.
-			err = ocm.VerifyLocalResource(ctx, r.Resolver, resolveOpts, resourceDescriptor, matchedResource)
-		} else {
-			matchedResource, err = ocm.VerifyResource(ctx, pm, matchedResource, cfg)
-		}
+		matchedResource, err = ocm.VerifyResourceContent(ctx, r.Resolver, resolveOpts, cfg, resourceDescriptor, matchedResource)
 		if err != nil {
 			status.MarkNotReady(r.EventRecorder, resource, v1alpha1.GetOCMResourceFailedReason, err.Error())
 

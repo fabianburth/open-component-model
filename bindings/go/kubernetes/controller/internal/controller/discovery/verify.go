@@ -77,10 +77,7 @@ func (r *Reconciler) verifyResource(
 	opts *resolution.Options,
 	cfg *configuration.Configuration,
 ) error {
-	if ocm.IsLocalResource(res) {
-		return ocm.VerifyLocalResource(ctx, r.Resolver, opts, desc, res)
-	}
-	verified, err := ocm.VerifyResource(ctx, opts.PluginManager, res.DeepCopy(), cfg)
+	verified, err := ocm.VerifyResourceContent(ctx, r.Resolver, opts, cfg, desc, res)
 	if err != nil {
 		return err
 	}

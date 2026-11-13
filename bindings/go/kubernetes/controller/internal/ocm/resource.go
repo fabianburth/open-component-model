@@ -44,6 +44,28 @@ func VerifyLocalResource(ctx context.Context, resolver *resolution.Resolver, opt
 	return nil
 }
 
+// VerifyResourceContent verifies res, a resource of desc, as a Resource or a Discovery publishes it, and returns
+// the resource to publish: a local resource is checked against the digest its repository stores it under and
+// returned as is, any other is checked by its digest processor and returned with its access pinned to the verified
+// digest. res is not modified.
+func VerifyResourceContent(
+	ctx context.Context,
+	resolver *resolution.Resolver,
+	opts *resolution.Options,
+	cfg *configuration.Configuration,
+	desc *descriptor.Descriptor,
+	res *descriptor.Resource,
+) (*descriptor.Resource, error) {
+	if IsLocalResource(res) {
+		if err := VerifyLocalResource(ctx, resolver, opts, desc, res); err != nil {
+			return nil, err
+		}
+		return res, nil
+	}
+
+	return VerifyResource(ctx, opts.PluginManager, res.DeepCopy(), cfg)
+}
+
 // VerifyResource verifies and processes the resource digest using the appropriate digest processor plugin.
 func VerifyResource(ctx context.Context, pm *manager.PluginManager, resource *descriptor.Resource, cfg *configuration.Configuration) (*descriptor.Resource, error) {
 	logger := log.FromContext(ctx)

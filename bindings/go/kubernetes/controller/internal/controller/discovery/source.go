@@ -146,7 +146,6 @@ func (r *Reconciler) deleteGenerated(ctx context.Context, discovery *v1alpha1.Di
 		&v1alpha1.Repository{ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.GeneratedRepositoryName(discovery.GetName())}},
 	}
 	for _, obj := range generated {
-
 		key := client.ObjectKey{Namespace: discovery.GetNamespace(), Name: obj.GetName()}
 		if err := r.Get(ctx, key, obj); err != nil {
 			if apierrors.IsNotFound(err) {

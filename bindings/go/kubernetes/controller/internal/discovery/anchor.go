@@ -162,3 +162,42 @@ func referenceDigest(ref *descriptor.Reference) *v2.Digest {
 func completeDigest(dig *v2.Digest) bool {
 	return dig != nil && dig.Value != "" && dig.HashAlgorithm != "" && dig.NormalisationAlgorithm != ""
 }
+
+// ReferencePaths returns a reference path from root to every component version
+// of graph: its anchoring path if it is anchored, otherwise the first path
+// breadth-first in reference order. A component version that the root does
+// not reach is absent.
+func ReferencePaths(graph Graph, root ComponentKey, anchors Anchors) map[ComponentKey][]runtime.Identity {
+	byKey := make(map[ComponentKey]*descriptor.Descriptor, len(graph.Descriptors))
+	for _, d := range graph.Descriptors {
+		byKey[keyOf(d)] = d
+	}
+	if _, ok := byKey[root]; !ok {
+		return nil
+	}
+
+	paths := map[ComponentKey][]runtime.Identity{root: nil}
+	queue := []ComponentKey{root}
+	for len(queue) > 0 {
+		key := queue[0]
+		queue = queue[1:]
+		for i := range byKey[key].Component.References {
+			ref := &byKey[key].Component.References[i]
+			target := ComponentKey{Name: ref.Component, Version: ref.Version}
+			if _, done := paths[target]; done {
+				continue
+			}
+			if _, ok := byKey[target]; !ok {
+				continue
+			}
+			if anchor, ok := anchors[target]; ok {
+				paths[target] = anchor.ReferencePath
+			} else {
+				paths[target] = append(slices.Clone(paths[key]), ref.ToIdentity())
+			}
+			queue = append(queue, target)
+		}
+	}
+
+	return paths
+}

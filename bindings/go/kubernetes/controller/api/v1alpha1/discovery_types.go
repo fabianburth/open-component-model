@@ -7,6 +7,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"ocm.software/open-component-model/bindings/go/runtime"
 )
 
 const KindDiscovery = "Discovery"
@@ -174,13 +176,23 @@ type DiscoveredResource struct {
 	// Component is the component version the resource belongs to. Its digest
 	// is the digest of that component version: the root's digest as resolved
 	// by the Component, a child's digest as recorded in its parent's
-	// reference.
+	// reference. Its repository spec is the one of the root, from which the
+	// Discovery resolves the whole graph. Both are informational: consumers
+	// re-resolve the component version from the verified root through
+	// referencePath.
 	// +required
 	Component ComponentInfo `json:"component"`
 
 	// Resource is the discovered resource.
 	// +required
 	Resource ResourceInfo `json:"resource"`
+
+	// ReferencePath is the path of component references from the root
+	// component version to the component version of the resource, in the
+	// form of a Resource's spec.resource.byReference.referencePath. The last
+	// reference recorded component.digest. It is empty for the root.
+	// +optional
+	ReferencePath []runtime.Identity `json:"referencePath,omitempty"`
 }
 
 // DiscoveryStatus defines the observed state of Discovery.

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -16,6 +17,7 @@ import (
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/ocm"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/resolution"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/pkg/configuration"
+	ocmruntime "ocm.software/open-component-model/bindings/go/runtime"
 )
 
 // resourceVerificationLimit bounds the resources verified concurrently in one
@@ -90,11 +92,13 @@ func (r *Reconciler) verifyResource(
 // discoveredResources builds one status entry per resource of filtered,
 // sorted by component name, component version and resource identity. Every
 // entry carries the root repository spec, from which the resolver of the
-// Discovery reaches every component version, and the digest its component
-// version was anchored to.
+// Discovery reaches every component version, the digest its component
+// version was anchored to and the reference path from the root that recorded
+// that digest.
 func discoveredResources(
 	filtered *internaldiscovery.Filtered,
 	anchors internaldiscovery.Anchors,
+	paths map[internaldiscovery.ComponentKey][]ocmruntime.Identity,
 	repositorySpec *apiextensionsv1.JSON,
 ) ([]v1alpha1.DiscoveredResource, error) {
 	type entry struct {
@@ -119,7 +123,8 @@ func discoveredResources(
 						Version:        key.Version,
 						Digest:         anchors[key].Digest.DeepCopy(),
 					},
-					Resource: *info,
+					Resource:      *info,
+					ReferencePath: cloneIdentities(paths[key]),
 				},
 			})
 		}
@@ -138,4 +143,16 @@ func discoveredResources(
 	}
 
 	return resources, nil
+}
+
+func cloneIdentities(path []ocmruntime.Identity) []ocmruntime.Identity {
+	if len(path) == 0 {
+		return nil
+	}
+	cloned := make([]ocmruntime.Identity, 0, len(path))
+	for _, id := range path {
+		cloned = append(cloned, maps.Clone(id))
+	}
+
+	return cloned
 }

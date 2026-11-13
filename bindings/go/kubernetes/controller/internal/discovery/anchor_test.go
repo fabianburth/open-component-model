@@ -164,3 +164,27 @@ func TestAnchor(t *testing.T) {
 		require.ErrorContains(t, err, "root component version root:1.0.0 does not match")
 	})
 }
+
+func TestReferencePaths(t *testing.T) {
+	r := require.New(t)
+	root := ComponentKey{Name: "root", Version: "1.0.0"}
+	graph := Graph{Descriptors: []*descriptor.Descriptor{
+		newDescriptor("leaf", "1.0.0"),
+		newDescriptor("unanchored", "1.0.0", withReferences(digestedReference("leaf", "leaf", "1.0.0", "leaf"))),
+		newDescriptor("anchored", "1.0.0", withReferences(digestedReference("leaf", "leaf", "1.0.0", "leaf"))),
+		newDescriptor("root", "1.0.0", withReferences(
+			newReference("unanchored", "unanchored", "1.0.0"),
+			digestedReference("anchored", "anchored", "1.0.0", "anchored"),
+		)),
+	}}
+
+	anchors, _, err := Anchor(t.Context(), graph, root, testDigest("root"), verifyByName)
+	r.NoError(err)
+	r.Equal(map[ComponentKey][]runtime.Identity{
+		root:                                   nil,
+		{Name: "unanchored", Version: "1.0.0"}: {{"name": "unanchored", "version": "1.0.0"}},
+		{Name: "anchored", Version: "1.0.0"}:   {{"name": "anchored", "version": "1.0.0"}},
+		// The anchoring path wins over the first path breadth-first.
+		{Name: "leaf", Version: "1.0.0"}: {{"name": "anchored", "version": "1.0.0"}, {"name": "leaf", "version": "1.0.0"}},
+	}, ReferencePaths(graph, root, anchors))
+}

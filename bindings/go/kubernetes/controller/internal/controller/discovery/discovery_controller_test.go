@@ -229,7 +229,11 @@ func TestReconcile_PublishesRawAndExtractedPayloads(t *testing.T) {
 	}
 	discovery := &v1alpha1.Discovery{
 		ObjectMeta: metav1.ObjectMeta{Name: "discovery", Namespace: "default"},
-		Spec:       v1alpha1.DiscoverySpec{ComponentRef: corev1.LocalObjectReference{Name: component.Name}},
+		// The fixture graph carries no digests.
+		Spec: v1alpha1.DiscoverySpec{
+			ComponentRef:       corev1.LocalObjectReference{Name: component.Name},
+			VerificationPolicy: v1alpha1.VerificationPolicyNever,
+		},
 	}
 	rec, c := realPluginReconciler(t, component, discovery)
 

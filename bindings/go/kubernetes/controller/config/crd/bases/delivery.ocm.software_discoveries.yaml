@@ -477,7 +477,10 @@ spec:
                         Component is the component version the resource belongs to. Its digest
                         is the digest of that component version: the root's digest as resolved
                         by the Component, a child's digest as recorded in its parent's
-                        reference.
+                        reference. Its repository spec is the one of the root, from which the
+                        Discovery resolves the whole graph. Both are informational: consumers
+                        re-resolve the component version from the verified root through
+                        referencePath.
                       properties:
                         component:
                           type: string
@@ -523,6 +526,21 @@ spec:
                       - repositorySpec
                       - version
                       type: object
+                    referencePath:
+                      description: |-
+                        ReferencePath is the path of component references from the root
+                        component version to the component version of the resource, in the
+                        form of a Resource's spec.resource.byReference.referencePath. The last
+                        reference recorded component.digest. It is empty for the root.
+                      items:
+                        additionalProperties:
+                          type: string
+                        description: |-
+                          Identity is a map that represents a set of attributes that uniquely identity
+                          arbitrary resources. It is used in various places in Open Component Model to uniquely
+                          identity objects such as resources or components.
+                        type: object
+                      type: array
                     resource:
                       description: Resource is the discovered resource.
                       properties:

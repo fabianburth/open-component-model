@@ -115,6 +115,8 @@ func TestReconcile_MissingReferenceDigestForcesFullTraversal(t *testing.T) {
 	component := readyComponentWithSpec("component", ns, "ocm.software/root", "1.0.0", f.spec)
 	component.Status.Component.Digest = f.digest(t, "ocm.software/root", "1.0.0")
 	discovery := discoveryFor(component.Name, ns)
+	// Only Never publishes a graph with a broken digest chain.
+	discovery.Spec.VerificationPolicy = v1alpha1.VerificationPolicyNever
 	rec, c := realPluginReconciler(t, component, discovery)
 	key := client.ObjectKeyFromObject(discovery)
 

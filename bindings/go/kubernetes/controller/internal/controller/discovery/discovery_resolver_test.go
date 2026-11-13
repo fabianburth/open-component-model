@@ -177,6 +177,8 @@ func TestReconcile_PathMatcherResolutionAcrossRepositories(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "discovery", Namespace: ns},
 		Spec: v1alpha1.DiscoverySpec{
 			ComponentRef: corev1.LocalObjectReference{Name: component.Name},
+			// The fixture graph carries no digests.
+			VerificationPolicy: v1alpha1.VerificationPolicyNever,
 			OCMConfig: []v1alpha1.OCMConfiguration{{
 				NamespacedObjectKindReference: v1alpha1.NamespacedObjectKindReference{Kind: "ConfigMap", Name: cm.Name},
 			}},
@@ -228,6 +230,8 @@ func TestReconcile_FallbackResolutionAcrossRepositories(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "discovery", Namespace: ns},
 		Spec: v1alpha1.DiscoverySpec{
 			ComponentRef: corev1.LocalObjectReference{Name: component.Name},
+			// The fixture graph carries no digests.
+			VerificationPolicy: v1alpha1.VerificationPolicyNever,
 			OCMConfig: []v1alpha1.OCMConfiguration{{
 				NamespacedObjectKindReference: v1alpha1.NamespacedObjectKindReference{Kind: "ConfigMap", Name: cm.Name},
 			}},
@@ -276,6 +280,8 @@ func TestReconcile_MatchedRepositoryMissingChildDoesNotFallThrough(t *testing.T)
 		ObjectMeta: metav1.ObjectMeta{Name: "discovery", Namespace: ns},
 		Spec: v1alpha1.DiscoverySpec{
 			ComponentRef: corev1.LocalObjectReference{Name: component.Name},
+			// The fixture graph carries no digests.
+			VerificationPolicy: v1alpha1.VerificationPolicyNever,
 			OCMConfig: []v1alpha1.OCMConfiguration{{
 				NamespacedObjectKindReference: v1alpha1.NamespacedObjectKindReference{Kind: "ConfigMap", Name: cm.Name},
 			}},
@@ -335,6 +341,8 @@ func TestReconcile_MixedResolverTypesFailRetryablyAndRetainPayload(t *testing.T)
 		ObjectMeta: metav1.ObjectMeta{Name: "discovery", Namespace: ns},
 		Spec: v1alpha1.DiscoverySpec{
 			ComponentRef: corev1.LocalObjectReference{Name: component.Name},
+			// The fixture graph carries no digests.
+			VerificationPolicy: v1alpha1.VerificationPolicyNever,
 			OCMConfig: []v1alpha1.OCMConfiguration{{
 				NamespacedObjectKindReference: v1alpha1.NamespacedObjectKindReference{Kind: "ConfigMap", Name: cm.Name},
 			}},
@@ -404,7 +412,11 @@ func TestReconcile_InheritedEffectiveConfigResolution(t *testing.T) {
 
 	discovery := &v1alpha1.Discovery{
 		ObjectMeta: metav1.ObjectMeta{Name: "discovery", Namespace: ns},
-		Spec:       v1alpha1.DiscoverySpec{ComponentRef: corev1.LocalObjectReference{Name: component.Name}},
+		// The fixture graph carries no digests.
+		Spec: v1alpha1.DiscoverySpec{
+			ComponentRef:       corev1.LocalObjectReference{Name: component.Name},
+			VerificationPolicy: v1alpha1.VerificationPolicyNever,
+		},
 	}
 
 	rec, c := realPluginReconciler(t, cm, component, discovery)

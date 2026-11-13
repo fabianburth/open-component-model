@@ -95,6 +95,10 @@ const (
 	// PayloadTooLargeReason is used when the Discovery status payload exceeds the API server size limit.
 	PayloadTooLargeReason = "PayloadTooLarge"
 
+	// IncompleteDigestChainReason is used when verificationPolicy Always is set and the root or a reference of the
+	// discovered graph has no complete digest, so the graph cannot be chained to the verified root.
+	IncompleteDigestChainReason = "IncompleteDigestChain"
+
 	// GenerateSourceFailedReason is used when the Repository or Component generated from the inline source of a
 	// Discovery cannot be applied or deleted.
 	GenerateSourceFailedReason = "GenerateSourceFailed"

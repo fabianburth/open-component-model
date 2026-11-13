@@ -276,9 +276,18 @@ func (r *Reconciler) reconcile(ctx context.Context, discovery *v1alpha1.Discover
 
 		return ctrl.Result{}, fmt.Errorf("failed to verify the component graph: %w", err)
 	}
+	// Under Always, Ready means every published component version is chained
+	// to the verified root, so a gap in the chain fails closed. Under Never
+	// it is reported only; the digests that are present were checked anyway.
 	if len(unanchored) > 0 {
-		event.New(r.EventRecorder, discovery, nil, v1alpha1.EventSeverityError,
-			"%s: %s", resolution.ErrNotSafelyDigestible, strings.Join(unanchored, "; "))
+		gaps := fmt.Errorf("%w: %s", resolution.ErrNotSafelyDigestible, strings.Join(unanchored, "; "))
+		if discovery.Spec.VerificationPolicy != v1alpha1.VerificationPolicyNever {
+			status.MarkNotReady(r.EventRecorder, discovery, v1alpha1.IncompleteDigestChainReason,
+				gaps.Error()+" (set verificationPolicy Never to accept an incomplete digest chain)")
+
+			return ctrl.Result{}, fmt.Errorf("failed to chain the component graph to its root: %w", gaps)
+		}
+		event.New(r.EventRecorder, discovery, nil, v1alpha1.EventSeverityError, "%s", gaps.Error())
 	}
 
 	filtered, err := query.Filter(ctx, *graph)
@@ -304,7 +313,7 @@ func (r *Reconciler) reconcile(ctx context.Context, discovery *v1alpha1.Discover
 		return ctrl.Result{}, reconcile.TerminalError(err)
 	}
 
-	resources, err := discoveredResources(filtered, anchors, info.RepositorySpec)
+	resources, err := discoveredResources(filtered, anchors, internaldiscovery.ReferencePaths(*graph, root, anchors), info.RepositorySpec)
 	if err != nil {
 		status.MarkAsStalled(r.EventRecorder, discovery, v1alpha1.MarshalFailedReason, err.Error())
 
@@ -321,8 +330,9 @@ func (r *Reconciler) reconcile(ctx context.Context, discovery *v1alpha1.Discover
 		return ctrl.Result{}, reconcile.TerminalError(err)
 	}
 
+	// Only a complete chain lets the root digest stand for the whole graph.
 	discovery.Status.ObservedComponentDigest = ""
-	if graph.DigestsComplete() {
+	if len(unanchored) == 0 {
 		discovery.Status.ObservedComponentDigest = digestKey(info.Digest)
 	}
 
@@ -410,7 +420,7 @@ func (r *Reconciler) setPayload(
 // A component descriptor digest covers its references' digests, which cover
 // theirs, so an unchanged root digest means an unchanged transitive graph. The
 // recorded digest is only written when that chain was complete (see
-// Graph.DigestsComplete), so an empty value here always forces a full
+// internaldiscovery.Anchor), so an empty value here always forces a full
 // re-discovery.
 func upToDate(discovery *v1alpha1.Discovery, info v1alpha1.ComponentInfo) bool {
 	if discovery.Status.ObservedComponentDigest == "" {

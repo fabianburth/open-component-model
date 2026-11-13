@@ -335,30 +335,112 @@ func TestVerifiedDiscovery_RootIsAnchoredToComponentDigest(t *testing.T) {
 	r.Contains(ready.Message, "ocm.software/root:1.0.0")
 }
 
-// Without digests nothing can be anchored: the graph is published, but every
-// gap is reported as a warning, like ErrNotSafelyDigestible on a Resource.
-func TestVerifiedDiscovery_MissingDigestsWarn(t *testing.T) {
-	r := require.New(t)
+// Under Always, Ready means chained to the verified root: a missing root or
+// reference digest fails closed, but not terminally. Under Never every gap is
+// reported as a warning, like ErrNotSafelyDigestible on a Resource.
+func TestVerifiedDiscovery_MissingDigests(t *testing.T) {
 	const ns = "default"
-	f := newCTFFixture(t)
-	f.add(t,
-		makeDescriptor("ocm.software/child", "1.0.0"),
-		makeDescriptor("ocm.software/root", "1.0.0", makeRef("child", "ocm.software/child", "1.0.0")),
+	type refDigest int
+	const (
+		noDigest refDigest = iota
+		validDigest
+		tamperedDigest
 	)
-	component := readyComponentWithSpec("component", ns, "ocm.software/root", "1.0.0", f.spec)
-	discovery := discoveryFor(component.Name, ns)
-	rec, c := realPluginReconciler(t, component, discovery)
+	build := func(t *testing.T, rootDigest bool, referenceDigest refDigest, policy v1alpha1.VerificationPolicy) (*Reconciler, client.Client, *v1alpha1.Discovery) {
+		t.Helper()
+		f := newCTFFixture(t)
+		child := makeDescriptor("ocm.software/child", "1.0.0")
+		child.Component.Resources = []desc.Resource{f.localBlob(t, "ocm.software/child", "1.0.0", "data", "content", false)}
+		f.add(t, child)
+		ref := makeRef("child", "ocm.software/child", "1.0.0")
+		if referenceDigest != noDigest {
+			dig := f.digest(t, "ocm.software/child", "1.0.0")
+			if referenceDigest == tamperedDigest {
+				dig.Value = digest.FromString("other").Encoded()
+			}
+			ref = anchoredRef("child", "ocm.software/child", "1.0.0", dig)
+		}
+		f.add(t, makeDescriptor("ocm.software/root", "1.0.0", ref))
+		component := readyComponentWithSpec("component", ns, "ocm.software/root", "1.0.0", f.spec)
+		if rootDigest {
+			component.Status.Component.Digest = f.digest(t, "ocm.software/root", "1.0.0")
+		}
+		discovery := discoveryFor(component.Name, ns)
+		discovery.Spec.VerificationPolicy = policy
+		rec, c := realPluginReconciler(t, component, discovery)
 
-	current, err := reconcileOnce(t, rec, c, discovery)
-	r.NoError(err)
-	r.Equal(metav1.ConditionTrue, status.FindCondition(current, v1alpha1.ReadyCondition).Status)
-	r.NotNil(current.Status.Resources, "a computed empty result is published as an empty list")
-	r.Empty(current.Status.Resources)
+		return rec, c, discovery
+	}
+	failsClosed := func(t *testing.T, rec *Reconciler, c client.Client, discovery *v1alpha1.Discovery, gap string) {
+		t.Helper()
+		r := require.New(t)
+		current, err := reconcileOnce(t, rec, c, discovery)
+		r.Error(err)
+		r.NotErrorIs(err, reconcile.TerminalError(nil))
+		ready := status.FindCondition(current, v1alpha1.ReadyCondition)
+		r.Equal(metav1.ConditionFalse, ready.Status)
+		r.Equal(v1alpha1.IncompleteDigestChainReason, ready.Reason)
+		r.Contains(ready.Message, gap)
+		r.Nil(current.Status.Resources)
+		r.Empty(current.Status.ObservedComponentDigest)
+	}
 
-	events := drainEvents(t, rec)
-	r.Contains(events, "Warning")
-	r.Contains(events, "ocm.software/root:1.0.0")
-	r.Contains(events, "ocm.software/child:1.0.0")
+	t.Run("Always fails on a root without a digest", func(t *testing.T) {
+		rec, c, discovery := build(t, false, validDigest, v1alpha1.VerificationPolicyAlways)
+		failsClosed(t, rec, c, discovery, "root component version ocm.software/root:1.0.0 has no complete digest")
+	})
+
+	t.Run("Always fails on a reference without a digest", func(t *testing.T) {
+		rec, c, discovery := build(t, true, noDigest, v1alpha1.VerificationPolicyAlways)
+		failsClosed(t, rec, c, discovery, `reference "child" of ocm.software/root:1.0.0 to ocm.software/child:1.0.0 has no complete digest`)
+	})
+
+	t.Run("Always publishes a complete chain with reference paths", func(t *testing.T) {
+		r := require.New(t)
+		rec, c, discovery := build(t, true, validDigest, v1alpha1.VerificationPolicyAlways)
+
+		current, err := reconcileOnce(t, rec, c, discovery)
+		r.NoError(err)
+		r.Equal(metav1.ConditionTrue, status.FindCondition(current, v1alpha1.ReadyCondition).Status)
+		r.NotEmpty(current.Status.ObservedComponentDigest)
+		r.Len(current.Status.Resources, 1)
+		entry := current.Status.Resources[0]
+		r.Equal("ocm.software/child", entry.Component.Component)
+		r.NotNil(entry.Component.Digest)
+		r.Equal([]ocmruntime.Identity{{"name": "child", "version": "1.0.0"}}, entry.ReferencePath)
+	})
+
+	t.Run("Never warns and is Ready", func(t *testing.T) {
+		r := require.New(t)
+		rec, c, discovery := build(t, false, noDigest, v1alpha1.VerificationPolicyNever)
+
+		current, err := reconcileOnce(t, rec, c, discovery)
+		r.NoError(err)
+		r.Equal(metav1.ConditionTrue, status.FindCondition(current, v1alpha1.ReadyCondition).Status)
+		r.Empty(current.Status.ObservedComponentDigest, "an incomplete chain never short-circuits")
+		r.Len(current.Status.Resources, 1)
+		entry := current.Status.Resources[0]
+		r.Nil(entry.Component.Digest)
+		r.Equal([]ocmruntime.Identity{{"name": "child", "version": "1.0.0"}}, entry.ReferencePath,
+			"an unanchored component version still gets a path from the root")
+
+		events := drainEvents(t, rec)
+		r.Contains(events, "Warning")
+		r.Contains(events, "ocm.software/root:1.0.0")
+		r.Contains(events, "ocm.software/child:1.0.0")
+	})
+
+	t.Run("Never still fails on a present digest that does not match", func(t *testing.T) {
+		r := require.New(t)
+		rec, c, discovery := build(t, false, tamperedDigest, v1alpha1.VerificationPolicyNever)
+
+		current, err := reconcileOnce(t, rec, c, discovery)
+		r.Error(err)
+		ready := status.FindCondition(current, v1alpha1.ReadyCondition)
+		r.Equal(metav1.ConditionFalse, ready.Status)
+		r.Equal(v1alpha1.GetComponentVersionFailedReason, ready.Reason)
+		r.Contains(ready.Message, `does not match the digest recorded by reference "child"`)
+	})
 }
 
 func TestVerifiedDiscovery_TamperedResource(t *testing.T) {

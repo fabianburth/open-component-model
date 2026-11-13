@@ -52,7 +52,8 @@ type Reconciler struct {
 
 var _ ocm.Reconciler = (*Reconciler)(nil)
 
-// componentRefIndex keys Discoveries by the Component they discover.
+// componentRefIndex keys Discoveries by the Component they discover: the
+// referenced one, or the one generated from their inline source.
 const componentRefIndex = "spec.componentRef.name"
 
 // SetupWithManager sets up the Discovery controller with the Manager.
@@ -65,7 +66,7 @@ func (r *Reconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, con
 			return nil
 		}
 
-		return []string{discovery.Spec.ComponentRef.Name}
+		return []string{rootComponentName(discovery)}
 	}); err != nil {
 		return fmt.Errorf("failed setting index fields: %w", err)
 	}
@@ -76,6 +77,10 @@ func (r *Reconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, con
 			&v1alpha1.Component{},
 			handler.EnqueueRequestsFromMapFunc(r.mapComponentToDiscoveries),
 			builder.WithPredicates(ocm.ComponentInfoChangedPredicate{})).
+		// Spec edits of the objects generated from an inline source enqueue
+		// the Discovery, which re-applies its desired spec.
+		Owns(&v1alpha1.Component{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Owns(&v1alpha1.Repository{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: concurrency,
 			RateLimiter:             r.RateLimit.Limiter(),
@@ -113,6 +118,8 @@ func (r *Reconciler) mapComponentToDiscoveries(ctx context.Context, obj client.O
 
 // +kubebuilder:rbac:groups=delivery.ocm.software,resources=discoveries,verbs=get;list;watch
 // +kubebuilder:rbac:groups=delivery.ocm.software,resources=discoveries/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=delivery.ocm.software,resources=discoveries/finalizers,verbs=update
+// +kubebuilder:rbac:groups=delivery.ocm.software,resources=repositories;components,verbs=get;list;watch;create;update;patch;delete
 
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -160,9 +167,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 func (r *Reconciler) reconcile(ctx context.Context, discovery *v1alpha1.Discovery) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
+	if err := r.reconcileSource(ctx, discovery); err != nil {
+		status.MarkNotReady(r.EventRecorder, discovery, generateSourceFailedReason, err.Error())
+
+		return ctrl.Result{}, err
+	}
+
 	component, err := util.GetReadyObject[v1alpha1.Component, *v1alpha1.Component](ctx, r.Client, client.ObjectKey{
 		Namespace: discovery.GetNamespace(),
-		Name:      discovery.Spec.ComponentRef.Name,
+		Name:      rootComponentName(discovery),
 	})
 	if err != nil {
 		status.MarkNotReady(r.EventRecorder, discovery, v1alpha1.ResourceIsNotAvailable, err.Error())

@@ -55,6 +55,7 @@ rules:
     resources:
       - components/finalizers
       - deployers/finalizers
+      - discoveries/finalizers
       - namespaceddeployers/finalizers
       - replications/finalizers
       - repositories/finalizers

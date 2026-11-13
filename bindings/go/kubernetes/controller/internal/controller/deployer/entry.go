@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	descriptor "ocm.software/open-component-model/bindings/go/descriptor/runtime"
@@ -24,6 +26,9 @@ type entry struct {
 	resource  *deliveryv1alpha1.ResourceInfo
 	// identity selects the resource in the component descriptor.
 	identity ocmruntime.Identity
+	// repositorySpec is the repository the entry's resource is downloaded through: the one of the Resource, or the
+	// one of the root of the Discovery.
+	repositorySpec *apiextensionsv1.JSON
 	// componentPatterns route matching components to the entry's repository spec ahead of configured resolvers.
 	componentPatterns []string
 	// componentDescriptor fetches the entry's component descriptor and checks its integrity.
@@ -39,6 +44,33 @@ func (e *entry) wrap(err error) error {
 	}
 
 	return fmt.Errorf("%s: %w", e.describe, err)
+}
+
+// name names the entry in messages about all entries.
+func (e *entry) name() string {
+	if e.describe == "" {
+		return "resource " + e.resource.Name
+	}
+
+	return e.describe
+}
+
+// objectKey identifies an applied object independently of its API version.
+type objectKey struct {
+	schema.GroupKind
+	namespace, name string
+}
+
+func objectKeyOf(obj *unstructured.Unstructured) objectKey {
+	return objectKey{GroupKind: obj.GroupVersionKind().GroupKind(), namespace: obj.GetNamespace(), name: obj.GetName()}
+}
+
+func (k objectKey) String() string {
+	if k.namespace == "" {
+		return fmt.Sprintf("%s %s", k.GroupKind, k.name)
+	}
+
+	return fmt.Sprintf("%s %s/%s", k.GroupKind, k.namespace, k.name)
 }
 
 // deployable is an entry with the objects decoded from its resource.

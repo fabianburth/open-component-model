@@ -408,10 +408,11 @@ func (r *Reconciler) reconcileDeployment(ctx context.Context, deployer deliveryv
 	}
 
 	d, err := r.loadEntry(ctx, deployer, &entry{
-		owner:     resource,
-		component: resource.Status.Component,
-		resource:  resource.Status.Resource,
-		identity:  resource.Spec.Resource.ByReference.Resource,
+		owner:          resource,
+		component:      resource.Status.Component,
+		resource:       resource.Status.Resource,
+		identity:       resource.Spec.Resource.ByReference.Resource,
+		repositorySpec: resource.Status.Component.RepositorySpec,
 		componentDescriptor: func(ctx context.Context, cfg *configuration.Configuration, pm *manager.PluginManager) (*descriptor.Descriptor, error) {
 			return r.getEffectiveComponentDescriptor(ctx, deployer, resource, cfg, pm)
 		},
@@ -522,7 +523,7 @@ func (r *Reconciler) createRepositoryResolver(
 	cfg *configuration.Configuration,
 	pm *manager.PluginManager,
 ) (resolvers.ComponentVersionRepositoryResolver, error) {
-	repoSpec, err := decodeRepositorySpec(e.component.RepositorySpec)
+	repoSpec, err := decodeRepositorySpec(e.repositorySpec)
 	if err != nil {
 		err = e.wrap(err)
 		status.MarkNotReady(r.GetEventRecorder(), deployer, deliveryv1alpha1.GetRepositoryFailedReason, err.Error())
@@ -909,6 +910,8 @@ func (r *Reconciler) applyWithApplySet(ctx context.Context, deployer deliveryv1a
 	set := r.createApplySet(applyClient, deployer, logger)
 
 	var resourcesToAdd []applyset.Resource
+	// One object rendered by two entries would be applied twice with a nondeterministic winner.
+	renderedBy := map[objectKey]string{}
 	// Add all objects to the ApplySet
 	for _, d := range deployables {
 		logger.Info("adding objects to ApplySet", "count", len(d.objs), "resource", d.entry.resource.Name)
@@ -928,6 +931,12 @@ func (r *Reconciler) applyWithApplySet(ctx context.Context, deployer deliveryv1a
 			if err != nil {
 				return fmt.Errorf("failed to default object %s/%s: %w", obj.GetNamespace(), obj.GetName(), err)
 			}
+
+			key := objectKeyOf(obj)
+			if other, ok := renderedBy[key]; ok {
+				return fmt.Errorf("%s is rendered by both %s and %s", key, other, d.entry.name())
+			}
+			renderedBy[key] = d.entry.name()
 
 			if r.Namespaced {
 				setNamespacedDeployerAnnotation(obj, deployer)

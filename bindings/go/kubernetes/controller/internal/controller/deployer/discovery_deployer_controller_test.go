@@ -1,40 +1,25 @@
 package deployer
 
 import (
-	"bytes"
 	"context"
-	"crypto"
 	"encoding/json"
 	"fmt"
-	"log/slog"
-	"os"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	"ocm.software/open-component-model/bindings/go/blob/filesystem"
-	"ocm.software/open-component-model/bindings/go/blob/inmemory"
-	"ocm.software/open-component-model/bindings/go/ctf"
-	"ocm.software/open-component-model/bindings/go/descriptor/normalisation/json/v4alpha3"
+	"ocm.software/open-component-model/bindings/go/descriptor/normalisation"
+	"ocm.software/open-component-model/bindings/go/descriptor/normalisation/json/v4alpha1"
 	descruntime "ocm.software/open-component-model/bindings/go/descriptor/runtime"
-	v2 "ocm.software/open-component-model/bindings/go/descriptor/v2"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/api/v1alpha1"
-	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/status"
 	"ocm.software/open-component-model/bindings/go/kubernetes/controller/internal/test"
-	"ocm.software/open-component-model/bindings/go/oci"
-	ocictf "ocm.software/open-component-model/bindings/go/oci/ctf"
-	ctfv1 "ocm.software/open-component-model/bindings/go/oci/spec/repository/v1/ctf"
+	signingv1alpha1 "ocm.software/open-component-model/bindings/go/rsa/signing/v1alpha1"
 	"ocm.software/open-component-model/bindings/go/runtime"
-	"ocm.software/open-component-model/bindings/go/signing"
 )
 
 var _ = Describe("Deployer with a discoveryRef", func() {
@@ -178,6 +163,106 @@ var _ = Describe("Deployer with a discoveryRef", func() {
 		test.WaitForNotReadyObjectWithMessage(ctx, k8sClient, deployer, v1alpha1.ResourceIsNotAvailable, "not ready")
 	})
 
+	It("waits for the Discovery to observe its current generation", func(ctx SpecContext) {
+		ns := namespace.GetName()
+		createServiceAccount(ctx, ns, true)
+		entries := discoveryEntries(ctx, ns,
+			manifestBlob("cm-gen", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: dd-gen\n"),
+		)
+		discovery := createReadyDiscovery(ctx, ns, entries)
+
+		By("changing the spec without the Discovery controller observing it")
+		discovery.Spec.ResourceSelector = &v1alpha1.Selector{MatchIdentity: map[string]string{"name": "other"}}
+		Expect(k8sClient.Update(ctx, discovery)).To(Succeed())
+
+		deployer := createDiscoveryNamespacedDeployer(ctx, ns, discovery.GetName())
+		test.WaitForNotReadyObjectWithMessage(ctx, k8sClient, deployer, v1alpha1.ResourceIsNotAvailable, "has not observed generation")
+		Expect(errors.IsNotFound(k8sClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: "dd-gen"}, &corev1.ConfigMap{}))).To(BeTrue())
+
+		By("applying once the Discovery observed it")
+		setDiscoveryResources(ctx, discovery, entries)
+		test.WaitForReadyObject(ctx, k8sClient, deployer, map[string]any{})
+	})
+
+	It("resolves a referenced component version from the verified root through its reference path", func(ctx SpecContext) {
+		ns := namespace.GetName()
+		createServiceAccount(ctx, ns, true)
+		f := newFixtureCTF()
+		child := f.add(ctx, "ocm.software/child-"+ns, "1.0.0",
+			[]fixtureBlob{manifestBlob("cm-child", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: dd-child\ndata:\n  from: genuine\n")}, nil)
+		root, publicKey := signedRoot(ctx, f, "ocm.software/root-"+ns, digestedReference(ctx, "child", child))
+		entries := f.entries(ctx, child, runtime.Identity{"name": "child", "version": "1.0.0"})
+		secret := test.SetupSignatureVerificationConfig(ctx, k8sClient, ns, "verification", test.SignatureVerification{
+			Signature: rootSignature, Algorithm: signingv1alpha1.AlgorithmRSASSAPSS, PublicKey: publicKey,
+		})
+
+		By("pointing the entry's repository spec at another repository holding a different child")
+		attacker := newFixtureCTF()
+		attacker.add(ctx, child.Component.Name, child.Component.Version,
+			[]fixtureBlob{manifestBlob("cm-child", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: dd-child\ndata:\n  from: attacker\n")}, nil)
+		entries[0].Component.RepositorySpec = attacker.spec
+
+		discovery := createReadyDiscoveryOf(ctx, ns, f.info(ctx, root), entries, withEffectiveConfig(secret))
+		deployer := createDiscoveryNamespacedDeployer(ctx, ns, discovery.GetName())
+		test.WaitForReadyObject(ctx, k8sClient, deployer, map[string]any{})
+
+		By("applying the child reached from the root, ignoring the repository spec in the status")
+		cm := &corev1.ConfigMap{}
+		Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: "dd-child"}, cm)).To(Succeed())
+		Expect(cm.Data).To(HaveKeyWithValue("from", "genuine"))
+	})
+
+	It("rejects an entry whose status points at another component version", func(ctx SpecContext) {
+		ns := namespace.GetName()
+		createServiceAccount(ctx, ns, true)
+		f := newFixtureCTF()
+		child := f.add(ctx, "ocm.software/child-"+ns, "1.0.0",
+			[]fixtureBlob{manifestBlob("cm-child", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: dd-child\ndata:\n  from: genuine\n")}, nil)
+		root := f.add(ctx, "ocm.software/root-"+ns, "1.0.0", nil, []descruntime.Reference{digestedReference(ctx, "child", child)})
+
+		By("publishing the repository spec and digest of a component version the root does not reference")
+		attacker := newFixtureCTF()
+		forged := attacker.add(ctx, child.Component.Name, child.Component.Version,
+			[]fixtureBlob{manifestBlob("cm-child", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: dd-child\ndata:\n  from: attacker\n")}, nil)
+		entries := attacker.entries(ctx, forged, runtime.Identity{"name": "child", "version": "1.0.0"})
+
+		discovery := createReadyDiscoveryOf(ctx, ns, f.info(ctx, root), entries)
+		deployer := createDiscoveryNamespacedDeployer(ctx, ns, discovery.GetName())
+		test.WaitForNotReadyObjectWithMessage(ctx, k8sClient, deployer, v1alpha1.GetComponentVersionFailedReason, "does not match the digest discovery")
+		Expect(errors.IsNotFound(k8sClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: "dd-child"}, &corev1.ConfigMap{}))).To(BeTrue())
+	})
+
+	It("rejects a root whose signature does not verify", func(ctx SpecContext) {
+		ns := namespace.GetName()
+		createServiceAccount(ctx, ns, true)
+		f := newFixtureCTF()
+		root, _ := signedRoot(ctx, f, "ocm.software/root-"+ns, descruntime.Reference{}, manifestBlob("cm-root",
+			"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: dd-root\n"))
+		_, otherKey := test.SignComponent(ctx, rootSignature, signingv1alpha1.AlgorithmRSASSAPSS, []byte("other"), pm)
+		secret := test.SetupSignatureVerificationConfig(ctx, k8sClient, ns, "verification", test.SignatureVerification{
+			Signature: rootSignature, Algorithm: signingv1alpha1.AlgorithmRSASSAPSS, PublicKey: otherKey,
+		})
+
+		discovery := createReadyDiscoveryOf(ctx, ns, f.info(ctx, root), f.entries(ctx, root), withEffectiveConfig(secret))
+		deployer := createDiscoveryNamespacedDeployer(ctx, ns, discovery.GetName())
+		test.WaitForNotReadyObjectWithMessage(ctx, k8sClient, deployer, v1alpha1.GetComponentVersionFailedReason, "failed to verify root component version")
+		Expect(errors.IsNotFound(k8sClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: "dd-root"}, &corev1.ConfigMap{}))).To(BeTrue())
+	})
+
+	It("rejects two entries rendering the same object", func(ctx SpecContext) {
+		ns := namespace.GetName()
+		createServiceAccount(ctx, ns, true)
+		entries := discoveryEntries(ctx, ns,
+			manifestBlob("cm-a", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: dup\ndata:\n  from: a\n"),
+			manifestBlob("cm-b", "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: dup\ndata:\n  from: b\n"),
+		)
+		discovery := createReadyDiscovery(ctx, ns, entries)
+		deployer := createDiscoveryNamespacedDeployer(ctx, ns, discovery.GetName())
+		test.WaitForNotReadyObjectWithMessage(ctx, k8sClient, deployer, v1alpha1.ApplyFailed,
+			"ConfigMap "+ns+"/dup is rendered by both resource name=cm-a")
+		Expect(errors.IsNotFound(k8sClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: "dup"}, &corev1.ConfigMap{}))).To(BeTrue())
+	})
+
 	It("applies a Discovery with a cluster-scoped Deployer", func(ctx SpecContext) {
 		ns := namespace.GetName()
 		entries := discoveryEntries(ctx, ns,
@@ -209,144 +294,26 @@ var _ = Describe("Deployer with a discoveryRef", func() {
 	})
 })
 
-// fixtureBlob is a local blob resource of the Discovery fixture component.
-type fixtureBlob struct {
-	name, typ, mediaType string
-	content              []byte
-}
+// rootSignature is the name of the signature of signedRoot.
+const rootSignature = "discovery-root"
 
-func manifestBlob(name, manifest string) fixtureBlob {
-	return fixtureBlob{name: name, typ: "plainText", mediaType: "application/x-yaml", content: []byte(manifest)}
-}
-
-// discoveryEntries stores the blobs as local resources of one component version in a CTF and returns the entries
-// a Discovery publishes for them, anchored by the digest of the component version.
-func discoveryEntries(ctx SpecContext, namespace string, blobs ...fixtureBlob) []v1alpha1.DiscoveredResource {
+// signedRoot stores a root component version with ref (if named) and blobs, signed with a new key, and returns it
+// with the public key that verifies it.
+func signedRoot(ctx SpecContext, f *fixtureCTF, name string, ref descruntime.Reference, blobs ...fixtureBlob) (*descruntime.Descriptor, string) {
 	GinkgoHelper()
 
-	componentName := "ocm.software/discovery-deployer-" + namespace
-	componentVersion := "v1.0.0"
-	tempDir := GinkgoT().TempDir()
-
-	fs, err := filesystem.NewFS(tempDir, os.O_RDWR)
-	Expect(err).NotTo(HaveOccurred())
-	repo, err := oci.NewRepository(ocictf.WithCTF(ocictf.NewFromCTF(ctf.NewFileSystemCTF(fs))), oci.WithTempDir(tempDir))
-	Expect(err).NotTo(HaveOccurred())
-
-	resources := make([]descruntime.Resource, 0, len(blobs))
-	for _, b := range blobs {
-		res := &descruntime.Resource{
-			ElementMeta: descruntime.ElementMeta{
-				ObjectMeta: descruntime.ObjectMeta{Name: b.name, Version: "1.0.0"},
-			},
-			Type:     b.typ,
-			Relation: descruntime.LocalRelation,
-			Access: &v2.LocalBlob{
-				Type:      runtime.Type{Name: v2.LocalBlobAccessType, Version: v2.LocalBlobAccessTypeVersion},
-				MediaType: b.mediaType,
-			},
-		}
-		added, err := repo.AddLocalResource(ctx, componentName, componentVersion, res, inmemory.New(bytes.NewReader(b.content)))
+	var refs []descruntime.Reference
+	if ref.Name != "" {
+		refs = append(refs, ref)
+	}
+	var publicKey string
+	root := f.add(ctx, name, "1.0.0", blobs, refs, func(desc *descruntime.Descriptor) {
+		normalised, err := normalisation.Normalise(desc, v4alpha1.Algorithm)
 		Expect(err).NotTo(HaveOccurred())
-		resources = append(resources, *added)
-	}
-
-	desc := &descruntime.Descriptor{
-		Meta: descruntime.Meta{Version: "v2"},
-		Component: descruntime.Component{
-			ComponentMeta: descruntime.ComponentMeta{
-				ObjectMeta: descruntime.ObjectMeta{Name: componentName, Version: componentVersion},
-			},
-			Provider:  descruntime.Provider{Name: "ocm.software"},
-			Resources: resources,
-		},
-	}
-	Expect(repo.AddComponentVersion(ctx, desc)).To(Succeed())
-
-	digest, err := signing.GenerateDigest(ctx, desc, slog.New(logr.ToSlogHandler(log.FromContext(ctx))), v4alpha3.Algorithm, crypto.SHA256.String())
-	Expect(err).NotTo(HaveOccurred())
-
-	specData, err := json.Marshal(&ctfv1.Repository{
-		Type:       runtime.Type{Name: "ctf", Version: "v1"},
-		FilePath:   tempDir,
-		AccessMode: ctfv1.AccessModeReadOnly,
-	})
-	Expect(err).NotTo(HaveOccurred())
-
-	entries := make([]v1alpha1.DiscoveredResource, 0, len(resources))
-	for _, res := range resources {
-		access, err := json.Marshal(res.Access)
-		Expect(err).NotTo(HaveOccurred())
-		entries = append(entries, v1alpha1.DiscoveredResource{
-			Component: v1alpha1.ComponentInfo{
-				RepositorySpec: &apiextensionsv1.JSON{Raw: specData},
-				Component:      componentName,
-				Version:        componentVersion,
-				Digest:         descruntime.ConvertToV2Digest(digest),
-			},
-			Resource: v1alpha1.ResourceInfo{
-				Name:    res.Name,
-				Type:    res.Type,
-				Version: res.Version,
-				Access:  apiextensionsv1.JSON{Raw: access},
-				Digest:  descruntime.ConvertToV2Digest(res.Digest),
-			},
-		})
-	}
-
-	return entries
-}
-
-// createReadyDiscovery creates a Discovery of the entries' (root) component and publishes the entries in its status,
-// as the Discovery controller would once the graph is verified. The Discovery controller does not run in this suite.
-func createReadyDiscovery(ctx SpecContext, namespace string, entries []v1alpha1.DiscoveredResource, mutate ...func(*v1alpha1.Discovery)) *v1alpha1.Discovery {
-	GinkgoHelper()
-
-	discovery := &v1alpha1.Discovery{
-		ObjectMeta: metav1.ObjectMeta{Name: "discovery", Namespace: namespace},
-		Spec: v1alpha1.DiscoverySpec{Source: &v1alpha1.DiscoverySource{
-			RepositorySpec: entries[0].Component.RepositorySpec,
-			Component:      entries[0].Component.Component,
-			Semver:         entries[0].Component.Version,
-			Interval:       metav1.Duration{Duration: time.Minute},
-		}},
-	}
-	Expect(k8sClient.Create(ctx, discovery)).To(Succeed())
-	DeferCleanup(func(ctx SpecContext) {
-		test.DeleteObject(ctx, k8sClient, discovery)
-	})
-	setDiscoveryResources(ctx, discovery, entries, mutate...)
-
-	return discovery
-}
-
-func setDiscoveryResources(ctx SpecContext, discovery *v1alpha1.Discovery, entries []v1alpha1.DiscoveredResource, mutate ...func(*v1alpha1.Discovery)) {
-	GinkgoHelper()
-
-	Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(discovery), discovery)).To(Succeed())
-	discovery.Status.Resources = append([]v1alpha1.DiscoveredResource{}, entries...)
-	for _, m := range mutate {
-		m(discovery)
-	}
-	status.MarkReady(recorder, discovery, "discovered")
-	discovery.SetObservedGeneration(discovery.GetGeneration())
-	Expect(k8sClient.Status().Update(ctx, discovery)).To(Succeed())
-}
-
-func createDiscoveryNamespacedDeployer(ctx SpecContext, namespace, discoveryName string) *v1alpha1.NamespacedDeployer {
-	GinkgoHelper()
-
-	deployer := &v1alpha1.NamespacedDeployer{
-		ObjectMeta: metav1.ObjectMeta{Name: "nd", Namespace: namespace},
-		Spec: v1alpha1.NamespacedDeployerSpec{
-			DiscoveryRef:       &corev1.LocalObjectReference{Name: discoveryName},
-			ServiceAccountName: namespacedDeployerSA,
-		},
-	}
-	Expect(k8sClient.Create(ctx, deployer)).To(Succeed())
-	DeferCleanup(func(ctx SpecContext) {
-		test.DeleteObject(ctx, k8sClient, deployer)
+		var signature descruntime.Signature
+		signature, publicKey = test.SignComponent(ctx, rootSignature, signingv1alpha1.AlgorithmRSASSAPSS, normalised, pm)
+		desc.Signatures = append(desc.Signatures, signature)
 	})
 
-	return deployer
+	return root, publicKey
 }

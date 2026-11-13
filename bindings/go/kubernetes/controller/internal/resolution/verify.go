@@ -166,6 +166,12 @@ func verificationCredentials(
 	}
 }
 
+// VerifyDigest checks that desc matches digest, a digest recorded for it by a component reference or a Component.
+func VerifyDigest(ctx context.Context, desc *descriptor.Descriptor, digest *v2.Digest) error {
+	_, err := compareDigest(ctx, desc, digest)
+	return err
+}
+
 // compareDigest performs integrity verification using the provided digest against a fresh calculated digest of
 // the passed descriptor.
 func compareDigest(ctx context.Context, desc *descriptor.Descriptor, digest *v2.Digest) (*descriptor.Descriptor, error) {

@@ -50,6 +50,9 @@ type Options struct {
 	RepositorySpec runtime.Typed
 	Configuration  *configuration.Configuration
 	PluginManager  *manager.PluginManager
+	// ComponentPatterns route matching components to RepositorySpec ahead of the configured resolvers, see
+	// resolvers.Options.ComponentPatterns.
+	ComponentPatterns []string
 }
 
 // Verification selects how a fetched component version is verified. Verifications and Digest are mutually
@@ -122,7 +125,7 @@ func (r *Resolver) provider(ctx context.Context, opts *Options) (*resolvedProvid
 	if cfg != nil {
 		configHash = cfg.Hash
 	}
-	cacheKey, err := buildRepoCacheKey(configHash, opts.RepositorySpec)
+	cacheKey, err := buildRepoCacheKey(configHash, opts.RepositorySpec, opts.ComponentPatterns)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build repository cache key: %w", err)
 	}
@@ -131,7 +134,7 @@ func (r *Resolver) provider(ctx context.Context, opts *Options) (*resolvedProvid
 		return resolved, nil
 	}
 
-	resolved, err := r.createResolver(ctx, opts.RepositorySpec, cfg, opts.PluginManager)
+	resolved, err := r.createResolver(ctx, opts.RepositorySpec, cfg, opts.PluginManager, opts.ComponentPatterns)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create provider: %w", err)
 	}
@@ -142,9 +145,16 @@ func (r *Resolver) provider(ctx context.Context, opts *Options) (*resolvedProvid
 
 // createResolver creates a resolver based on the configuration.
 // The resolver handles resolving the appropriate repository for each component.
-func (r *Resolver) createResolver(ctx context.Context, spec runtime.Typed, cfg *configuration.Configuration, pm *manager.PluginManager) (*resolvedProvider, error) {
+func (r *Resolver) createResolver(
+	ctx context.Context,
+	spec runtime.Typed,
+	cfg *configuration.Configuration,
+	pm *manager.PluginManager,
+	patterns []string,
+) (*resolvedProvider, error) {
 	opts := resolvers.Options{
-		RepoProvider: pm.ComponentVersionRepositoryRegistry,
+		RepoProvider:      pm.ComponentVersionRepositoryRegistry,
+		ComponentPatterns: patterns,
 	}
 
 	var genericCfg *genericv1.Config
@@ -169,10 +179,10 @@ func (r *Resolver) createResolver(ctx context.Context, spec runtime.Typed, cfg *
 	return &resolvedProvider{resolver: resolver, credentialGraph: opts.CredentialGraph}, nil
 }
 
-// buildRepoCacheKey generates a cache key from the configuration hash and repository spec.
+// buildRepoCacheKey generates a cache key from the configuration hash, repository spec and component patterns.
 // It canonicalizes the repository spec using JCS (RFC 8785) before hashing to ensure consistent keys
 // regardless of field ordering in the JSON representation.
-func buildRepoCacheKey(configHash []byte, repoSpec runtime.Typed) (string, error) {
+func buildRepoCacheKey(configHash []byte, repoSpec runtime.Typed, patterns []string) (string, error) {
 	repoJSON, err := json.Marshal(repoSpec)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal repository spec: %w", err)
@@ -187,6 +197,11 @@ func buildRepoCacheKey(configHash []byte, repoSpec runtime.Typed) (string, error
 	// can safely ignore because fnv.Write never actually returns an error
 	_, _ = hasher.Write(configHash)
 	_, _ = hasher.Write(canonicalJSON)
+	for _, pattern := range patterns {
+		// The separator keeps ["ab"] and ["a", "b"] apart.
+		_, _ = hasher.Write([]byte{0})
+		_, _ = hasher.Write([]byte(pattern))
+	}
 
 	return fmt.Sprintf("%016x", hasher.Sum64()), nil
 }

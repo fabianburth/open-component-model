@@ -176,7 +176,9 @@ The three questions get one primitive each:
   digest). A `Resource` *is* one entry of a `Discovery`. `extracted` stays an optional, user-projected view next
   to it.
 * The `Deployer` references a `Discovery` and applies every entry as one ApplySet. An entry that drops out of the
-  selection is pruned. An entry the `Deployer` cannot apply is an error, not skipped.
+  selection is pruned. An entry the `Deployer` cannot apply is an error, not skipped: a deploy artifact such as an
+  RGD is often an untyped `blob`, so "deployable" could only be guessed from the content. Images and charts are
+  selected by a separate `Discovery` inside the deployed composition, not by the bootstrap `Discovery`.
 * Bootstrap is the same two generic objects for every product, as Flux bootstraps with a source plus a
   `Kustomization`; the `ocm` CLI can write the pair:
 
